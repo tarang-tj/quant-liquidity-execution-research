@@ -33,6 +33,7 @@ def promote_if_qualified(
     maximum_brier: float = 0.25,
     minimum_net_return_bps: float = 0.0,
     feed: str | None = None,
+    adjustment: str | None = "all",
 ) -> dict[str, Any]:
     """Train a candidate, gate it, and replace ``target_path`` only on success.
 
@@ -51,8 +52,9 @@ def promote_if_qualified(
     walk = walk_forward_evaluate(
         bars, training_bars=training_bars, evaluation_bars=evaluation_bars,
         timeframe=timeframe, transaction_cost_bps=transaction_cost_bps,
+        feed=feed, adjustment=adjustment,
     )
-    candidate = train_direction_model(bars, timeframe=timeframe, feed=feed)
+    candidate = train_direction_model(bars, timeframe=timeframe, feed=feed, adjustment=adjustment)
     checks = {
         "model_validation_gate": bool(candidate.report.deployable_for_paper),
         "walk_forward_accuracy": walk.accuracy >= minimum_accuracy,
@@ -63,6 +65,7 @@ def promote_if_qualified(
         "symbol": symbol.upper(),
         "timeframe": timeframe,
         "feed": feed,
+        "adjustment": adjustment,
         "target_path": str(target_path),
         "promoted": False,
         "checks": checks,
@@ -73,7 +76,7 @@ def promote_if_qualified(
     if not all(checks.values()):
         report["rejection_reason"] = "candidate did not satisfy every promotion gate"
         return report
-    validate_paper_model(candidate, symbol, timeframe, feed=feed)
+    validate_paper_model(candidate, symbol, timeframe, feed=feed, adjustment=adjustment)
     candidate.to_json(target_path)
     report["candidate_model_sha256"] = file_sha256(target_path)
     report["promoted"] = True
@@ -85,6 +88,8 @@ def main() -> None:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
                         help="Alpaca market-data feed; SIP requires the appropriate entitlement")
+    parser.add_argument("--adjustment", choices=("raw", "split", "dividend", "all"), default="all",
+                        help="corporate-action adjustment applied to historical bars")
     parser.add_argument("--input", type=Path, help="CSV with timestamp,open,high,low,close,volume")
     parser.add_argument("--bars", type=int, default=1_000)
     parser.add_argument("--training-bars", type=int, default=120)
@@ -97,7 +102,8 @@ def main() -> None:
     parser.add_argument("--target", type=Path)
     args = parser.parse_args()
     bars: list[Bar] = (read_csv(args.input, args.symbol) if args.input
-                       else AlpacaMarketDataClient(feed=args.feed).bars(args.symbol, limit=args.bars, timeframe=args.timeframe))
+                       else AlpacaMarketDataClient(feed=args.feed, adjustment=args.adjustment).bars(
+                           args.symbol, limit=args.bars, timeframe=args.timeframe))
     target = args.target or Path(__file__).resolve().parents[1] / "models" / f"{args.symbol.upper()}_logistic.json"
     report = promote_if_qualified(
         bars, symbol=args.symbol, target_path=target, timeframe=args.timeframe,
@@ -105,6 +111,7 @@ def main() -> None:
         transaction_cost_bps=args.transaction_cost_bps, minimum_accuracy=args.minimum_accuracy,
         maximum_brier=args.maximum_brier, minimum_net_return_bps=args.minimum_net_return_bps,
         feed=args.feed,
+        adjustment=args.adjustment,
     )
     print(json.dumps(report, sort_keys=True))
     if not report["promoted"]:

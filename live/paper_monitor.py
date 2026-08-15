@@ -48,10 +48,11 @@ def evaluate_read_only_once(
     max_bar_gap_seconds: float | None = None,
     min_direction_edge: float = 0.0,
     feed: str = "iex",
+    adjustment: str = "all",
 ) -> dict[str, object]:
     """Fetch one fresh snapshot, score it, and append evidence without POSTing."""
     active_model = model or LogisticDirectionModel.from_json(model_path)
-    validate_paper_model(active_model, symbol, feed=feed)
+    validate_paper_model(active_model, symbol, feed=feed, adjustment=adjustment)
     if expected_model_hash is not None and file_sha256(model_path) != expected_model_hash:
         raise RuntimeError("model file changed during monitor; refusing to mix model versions")
     quote = data_client.latest_quote(symbol)
@@ -122,6 +123,7 @@ def run_monitor(
     max_bar_gap_seconds: float | None = None,
     min_direction_edge: float = 0.0,
     feed: str = "iex",
+    adjustment: str = "all",
 ) -> list[dict[str, object]]:
     """Run a finite paper monitor; unbounded daemon operation is not supported."""
     if not isinstance(iterations, int) or isinstance(iterations, bool) or not 1 <= iterations <= 10_000:
@@ -130,7 +132,7 @@ def run_monitor(
         raise ValueError("interval_seconds must be between 0 and 86,400")
     if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
         raise ValueError("quantity must be a positive whole number")
-    client = data_client or AlpacaMarketDataClient(feed=feed)
+    client = data_client or AlpacaMarketDataClient(feed=feed, adjustment=adjustment)
     paper_broker = broker or AlpacaPaperBroker()
     log = decision_log or PaperDecisionLog(ROOT / "runtime" / "paper_monitor_decisions.jsonl")
     # Pair the bytes used to load the model with the hash that will be
@@ -138,7 +140,7 @@ def run_monitor(
     # instead of labeling version A predictions as version B evidence.
     pinned_model_hash = file_sha256(model_path)
     model = LogisticDirectionModel.from_json(model_path)
-    validate_paper_model(model, symbol, feed=feed)
+    validate_paper_model(model, symbol, feed=feed, adjustment=adjustment)
     if file_sha256(model_path) != pinned_model_hash:
         raise RuntimeError("model file changed during monitor startup; refusing to mix model versions")
     samples: list[dict[str, object]] = []
@@ -160,6 +162,7 @@ def run_monitor(
             max_bar_gap_seconds=max_bar_gap_seconds,
             min_direction_edge=min_direction_edge,
             feed=feed,
+            adjustment=adjustment,
         ))
         if index + 1 < iterations and interval_seconds:
             sleep_fn(interval_seconds)
@@ -171,6 +174,8 @@ def main() -> None:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
                         help="Alpaca market-data feed; SIP requires the appropriate entitlement")
+    parser.add_argument("--adjustment", choices=("raw", "split", "dividend", "all"), default="all",
+                        help="corporate-action adjustment applied to historical bars")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--iterations", type=int, default=1,
                         help="finite number of snapshots; defaults to one")
@@ -200,6 +205,7 @@ def main() -> None:
                              else args.max_bar_gap_minutes * 60),
         min_direction_edge=args.min_direction_edge,
         feed=args.feed,
+        adjustment=args.adjustment,
     )
     for sample in samples:
         print(json.dumps(sample, sort_keys=True))

@@ -30,19 +30,19 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
                   broker: AlpacaPaperBroker | None = None,
                   max_training_gap_seconds: float | None = None,
                   max_bar_gap_seconds: float | None = None,
-                  feed: str = "iex") -> dict[str, object]:
+                  feed: str = "iex", adjustment: str = "all") -> dict[str, object]:
     """Verify read-only prerequisites for paper execution without any order path."""
     checks: list[dict[str, object]] = []
     model: LogisticDirectionModel | None = None
     try:
         model = LogisticDirectionModel.from_json(model_path)
-        validate_paper_model(model, symbol, feed=feed)
+        validate_paper_model(model, symbol, feed=feed, adjustment=adjustment)
         checks.append(_result("model", True, "chronological validation and provenance gate passed"))
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         checks.append(_result("model", False, f"model unavailable or invalid: {type(exc).__name__}"))
 
     try:
-        client = data_client or AlpacaMarketDataClient(feed=feed)
+        client = data_client or AlpacaMarketDataClient(feed=feed, adjustment=adjustment)
         quote = client.latest_quote(symbol)
         bars = client.bars(symbol, limit=history_bars)
         if len(bars) < 21:
@@ -87,6 +87,8 @@ def main() -> None:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
                         help="Alpaca market-data feed; SIP requires the appropriate entitlement")
+    parser.add_argument("--adjustment", choices=("raw", "split", "dividend", "all"), default="all",
+                        help="corporate-action adjustment applied to historical bars")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--history-bars", type=int, default=100)
     parser.add_argument("--max-training-gap-hours", type=float,
@@ -98,7 +100,7 @@ def main() -> None:
     gap_seconds = None if args.max_training_gap_hours is None else args.max_training_gap_hours * 3_600
     bar_gap_seconds = None if args.max_bar_gap_minutes is None else args.max_bar_gap_minutes * 60
     report = run_preflight(args.symbol, model_path, args.history_bars,
-                           feed=args.feed, max_training_gap_seconds=gap_seconds,
+                           feed=args.feed, adjustment=args.adjustment, max_training_gap_seconds=gap_seconds,
                            max_bar_gap_seconds=bar_gap_seconds)
     print(json.dumps(report, sort_keys=True))
     if not report["ready_for_paper_evaluation"]:
