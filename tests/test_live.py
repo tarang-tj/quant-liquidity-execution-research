@@ -35,6 +35,7 @@ from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record, validate_quality_report
 from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
+from live.risk_approval import issue_risk_approval, validate_risk_approval, write_risk_approval
 from live.score_predictions import apply_quality_gate, build_quality_report, score_predictions, write_quality_report
 from live.stream_quotes import collect_quotes
 from live.walk_forward import walk_forward_evaluate
@@ -183,6 +184,38 @@ class LiveBridgeTest(unittest.TestCase):
                     validate_quality_report(report_path, symbol="SPY",
                                             model_sha256=report["model_sha256"], now=self.now,
                                             max_age_seconds=60)
+
+    def test_independent_risk_approval_is_bound_and_expires(self) -> None:
+        key = b"k" * 32
+        model_hash = "a" * 64
+        issued = self.quote.timestamp - timedelta(seconds=1)
+        approval = issue_risk_approval(client_order_id="approval-test", symbol="SPY", side="buy",
+                                       quantity=1, model_sha256=model_hash,
+                                       quote_timestamp=self.quote.timestamp, reason="independent review",
+                                       ttl_seconds=30, key=key, issued_at=issued)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "approval.json"
+            write_risk_approval(approval, path)
+            checked = validate_risk_approval(path, client_order_id="approval-test", symbol="SPY",
+                                             side="buy", quantity=1, model_sha256=model_hash,
+                                             quote_timestamp=self.quote.timestamp, now=self.quote.timestamp,
+                                             key=key)
+            self.assertEqual(checked.approval_id, approval.approval_id)
+            with self.assertRaises(ValueError):
+                validate_risk_approval(path, client_order_id="approval-test", symbol="SPY", side="buy",
+                                       quantity=2, model_sha256=model_hash,
+                                       quote_timestamp=self.quote.timestamp, now=self.quote.timestamp, key=key)
+            with self.assertRaises(ValueError):
+                validate_risk_approval(path, client_order_id="approval-test", symbol="SPY", side="buy",
+                                       quantity=1, model_sha256=model_hash,
+                                       quote_timestamp=self.quote.timestamp, now=issued + timedelta(seconds=31), key=key)
+            raw = json.loads(path.read_text())
+            raw["reason"] = "tampered"
+            path.write_text(json.dumps(raw))
+            with self.assertRaises(ValueError):
+                validate_risk_approval(path, client_order_id="approval-test", symbol="SPY", side="buy",
+                                       quantity=1, model_sha256=model_hash,
+                                       quote_timestamp=self.quote.timestamp, now=self.quote.timestamp, key=key)
 
     def test_health_snapshot_requires_quality_and_valid_journal_without_submission(self) -> None:
         model = train_direction_model(self.bars, feed="iex")

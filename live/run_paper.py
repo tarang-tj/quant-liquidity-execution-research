@@ -23,6 +23,7 @@ from live.predictor import (LogisticDirectionModel, direction_from_probability, 
                             validate_model_data_alignment,
                             validate_paper_model)
 from live.risk import OrderIntent, PaperSubmissionLease, RiskDecision, RiskLimits, validate_paper_order
+from live.risk_approval import validate_risk_approval
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -135,9 +136,17 @@ def main() -> None:
     parser.add_argument("--submit-paper-order", action="store_true", help="explicitly submit a qualifying paper order")
     parser.add_argument("--quality-report", type=Path,
                         help="passed model-health report required for paper submission")
+    parser.add_argument("--risk-approval", type=Path,
+                        help="independent short-lived approval artifact required for paper submission")
+    parser.add_argument("--client-order-id", help="stable ID bound into the risk approval")
     parser.add_argument("--max-quality-age-hours", type=float, default=24.0,
                         help="maximum age of the required quality report")
     args = parser.parse_args()
+    if args.risk_approval is not None and not args.submit_paper_order:
+        raise ValueError("--risk-approval requires --submit-paper-order")
+    client_order_id = args.client_order_id or f"research-{uuid4().hex}"
+    if args.submit_paper_order and not args.client_order_id:
+        raise ValueError("--client-order-id is required with --submit-paper-order")
     client = AlpacaMarketDataClient(feed=args.feed, adjustment=args.adjustment)
     quote = client.latest_quote(args.symbol)
     JsonlEventStore(ROOT / "runtime" / "quotes.jsonl").append_quotes([quote])
@@ -186,6 +195,14 @@ def main() -> None:
         report = {"symbol": quote.symbol, "mid_price": quote.mid_price, "spread_bps": quote.spread_bps,
                   "probability_next_bar_up": probability, "proposed_side": side, "risk": decision.reason,
                   "risk_source": risk_source, "submitted": False, "environment": "paper-only"}
+        if args.submit_paper_order and decision.approved:
+            if args.risk_approval is None:
+                raise ValueError("--risk-approval is required when a paper order is approved")
+            validate_risk_approval(args.risk_approval, client_order_id=client_order_id,
+                                   symbol=quote.symbol, side=side, quantity=args.quantity,
+                                   model_sha256=file_sha256(model_path), quote_timestamp=quote.timestamp)
+            risk_source += "; independently signed risk approval"
+            report["risk_source"] = risk_source
         audit = PaperDecision.create(model_path=model_path, symbol=quote.symbol, quote=quote, bars=bars,
                                      features=features.tolist(), probability=probability, side=side,
                                      risk_approved=decision.approved, risk_reason=decision.reason,
@@ -193,7 +210,7 @@ def main() -> None:
                                      broker_daily_pnl=broker_daily_pnl,
                                      broker_pending_buy_quantity=broker_pending_buy_quantity,
                                      broker_pending_sell_quantity=broker_pending_sell_quantity,
-                                     client_order_id=f"research-{uuid4().hex}")
+                                     client_order_id=client_order_id)
         decision_log = PaperDecisionLog(ROOT / "runtime" / "paper_decisions.jsonl")
         audit = decision_log.append(audit)  # Must succeed before any possible network submission.
         if args.submit_paper_order and decision.approved:
