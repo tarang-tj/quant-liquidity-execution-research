@@ -177,26 +177,53 @@ class AlpacaMarketDataClient:
             raise MarketDataError("provider returned fewer than two completed bars")
         return sorted(bars, key=lambda bar: bar.timestamp)
 
-    async def stream_quotes(self, symbols: list[str]) -> AsyncIterator[Quote]:
-        """Yield normalized real-time quote events. Requires optional `websockets`."""
+    async def stream_quotes(self, symbols: list[str], *, max_reconnects: int = 3,
+                            reconnect_backoff_seconds: float = 1.0) -> AsyncIterator[Quote]:
+        """Yield quotes with bounded reconnects; authentication failures fail closed.
+
+        The reconnect budget is intentionally finite so a broken feed cannot
+        turn into an unobserved infinite loop. Callers should supervise the
+        exhausted stream and decide whether to halt trading or page an operator.
+        """
+        if (not isinstance(symbols, list) or not symbols or
+                any(not isinstance(symbol, str) or not symbol.strip() for symbol in symbols)):
+            raise ValueError("symbols must be a non-empty list of non-empty strings")
+        if (not isinstance(max_reconnects, int) or isinstance(max_reconnects, bool) or max_reconnects < 0):
+            raise ValueError("max_reconnects must be a non-negative integer")
+        if (isinstance(reconnect_backoff_seconds, bool) or
+                not isinstance(reconnect_backoff_seconds, (int, float)) or
+                not isfinite(reconnect_backoff_seconds) or reconnect_backoff_seconds < 0 or
+                reconnect_backoff_seconds > 300):
+            raise ValueError("reconnect_backoff_seconds must be between 0 and 300 seconds")
+        normalized_symbols = sorted({symbol.upper() for symbol in symbols})
         try:
             import websockets
         except ImportError as exc:
             raise MarketDataError("install requirements-live.txt to use WebSocket streaming") from exc
         endpoint = f"wss://stream.data.alpaca.markets/v2/{self.feed}"
-        try:
-            async with websockets.connect(endpoint, open_timeout=15, ping_interval=20) as socket:
-                await socket.send(json.dumps({"action": "auth", "key": self.key, "secret": self.secret}))
-                auth = json.loads(await asyncio.wait_for(socket.recv(), timeout=10))
-                if not any(item.get("T") == "success" for item in auth if isinstance(item, dict)):
-                    raise MarketDataError("Alpaca WebSocket authentication failed")
-                await socket.send(json.dumps({"action": "subscribe", "quotes": [symbol.upper() for symbol in symbols]}))
-                async for raw_message in socket:
-                    messages = json.loads(raw_message)
-                    for item in messages if isinstance(messages, list) else [messages]:
-                        if isinstance(item, dict) and item.get("T") == "q":
-                            yield Quote.from_alpaca(item, source="alpaca-websocket")
-        except MarketDataError:
-            raise
-        except Exception as exc:  # provider-specific WebSocket errors have unstable types
-            raise MarketDataError("Alpaca quote stream disconnected") from exc
+        reconnects = 0
+        while True:
+            try:
+                async with websockets.connect(endpoint, open_timeout=15, ping_interval=20) as socket:
+                    await socket.send(json.dumps({"action": "auth", "key": self.key, "secret": self.secret}))
+                    auth = json.loads(await asyncio.wait_for(socket.recv(), timeout=10))
+                    auth_items = auth if isinstance(auth, list) else [auth]
+                    if not any(isinstance(item, dict) and item.get("T") == "success" for item in auth_items):
+                        raise MarketDataError("Alpaca WebSocket authentication failed")
+                    await socket.send(json.dumps({"action": "subscribe", "quotes": normalized_symbols}))
+                    async for raw_message in socket:
+                        messages = json.loads(raw_message)
+                        for item in messages if isinstance(messages, list) else [messages]:
+                            if isinstance(item, dict) and item.get("T") == "q":
+                                yield Quote.from_alpaca(item, source="alpaca-websocket")
+                    raise ConnectionError("Alpaca quote stream closed")
+            except MarketDataError:
+                raise
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # provider-specific WebSocket errors have unstable types
+                if reconnects >= max_reconnects:
+                    raise MarketDataError("Alpaca quote stream exhausted reconnect budget") from exc
+                delay = min(float(reconnect_backoff_seconds) * (2 ** reconnects), 300.0)
+                reconnects += 1
+                await asyncio.sleep(delay)

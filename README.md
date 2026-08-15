@@ -15,7 +15,7 @@ common-path bootstrap contrasts, hard capacity/completion checks, an explicitly
 non-deployable oracle diagnostic, a four-case robustness panel, and an
 an auditable completed-batch recalibration loop. The live bridge also has a
 causal walk-forward evaluator that reports prediction metrics plus a transparent
-turnover and transaction-cost stress accounting. Thirty-six fast invariant tests cover
+turnover and transaction-cost stress accounting. Thirty-nine fast invariant tests cover
 causality, forecast dynamics, gradients, constraints, path alignment, and
 two-cycle continual-learning timing.
 
@@ -124,7 +124,8 @@ broker lookup result is appended as a `reconciliation_result` event to the same
 journal (use `--decision-log <path>` only when the journal is non-default).
 
 The free Alpaca IEX feed is single-exchange data, not a consolidated market
-feed. A production system also needs entitlement-appropriate consolidated data,
-reconnect/replay handling, corporate-action adjustments, backtests with real
+feed. The WebSocket adapter uses a bounded reconnect budget and fails closed
+when it is exhausted. A production system also needs entitlement-appropriate
+consolidated data, replay/gap recovery, corporate-action adjustments, backtests with real
 transaction costs, independent model/risk approval, monitoring, and a long
 paper-trading record before live capital is considered.

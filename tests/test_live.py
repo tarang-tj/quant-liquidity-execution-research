@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from dataclasses import replace
+import asyncio
 import json
 import hashlib
 import multiprocessing
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -337,6 +339,61 @@ class LiveBridgeTest(unittest.TestCase):
         with patch.object(client, "_get_json", return_value=payload):
             bars = client.bars("SPY", limit=3, completed_before=now)
         self.assertEqual([bar.timestamp.minute for bar in bars], [30, 31])
+
+    def test_websocket_stream_reconnects_with_a_bounded_budget(self) -> None:
+        quote_message = json.dumps({"T": "q", "S": "SPY", "bp": 100.0, "ap": 100.02,
+                                    "bs": 10, "as": 12, "t": "2026-01-02T14:30:00Z"})
+
+        class FakeSocket:
+            def __init__(self) -> None:
+                self.sent: list[str] = []
+                self.yielded = False
+
+            async def __aenter__(self) -> "FakeSocket":
+                return self
+
+            async def __aexit__(self, *_args: object) -> None:
+                return None
+
+            async def send(self, message: str) -> None:
+                self.sent.append(message)
+
+            async def recv(self) -> str:
+                return json.dumps([{"T": "success"}])
+
+            def __aiter__(self) -> "FakeSocket":
+                return self
+
+            async def __anext__(self) -> str:
+                if not self.yielded:
+                    self.yielded = True
+                    return quote_message
+                raise ConnectionError("simulated disconnect")
+
+        sockets: list[FakeSocket] = []
+
+        class FakeWebsockets:
+            def connect(self, *_args: object, **_kwargs: object) -> FakeSocket:
+                socket = FakeSocket()
+                sockets.append(socket)
+                return socket
+
+        async def collect() -> list[Quote]:
+            client = AlpacaMarketDataClient(key="data-key", secret="data-secret")
+            output: list[Quote] = []
+            try:
+                async for quote in client.stream_quotes(["spy", "SPY"], max_reconnects=1,
+                                                        reconnect_backoff_seconds=0):
+                    output.append(quote)
+            except MarketDataError:
+                pass
+            return output
+
+        with patch.dict(sys.modules, {"websockets": FakeWebsockets()}):
+            quotes = asyncio.run(collect())
+        self.assertEqual(len(quotes), 2)
+        self.assertEqual(len(sockets), 2)
+        self.assertEqual(json.loads(sockets[0].sent[1])["quotes"], ["SPY"])
 
     def test_bar_schema_rejects_invalid_provider_payload(self) -> None:
         with self.assertRaises(MarketDataError):
