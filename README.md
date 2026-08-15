@@ -139,7 +139,8 @@ not the midpoint; order submission has no automatic retry path.
 
    To capture a finite, auditable WebSocket sample for feed-health and replay
    checks, use the read-only collector. It stops after the quote or wall-clock
-   budget and never invokes the broker:
+   budget, rejects unrequested symbols and out-of-order timestamps, reports
+   duplicate/gap metrics, and never invokes the broker:
 
    ```bash
    python live/stream_quotes.py --symbols SPY --feed iex \

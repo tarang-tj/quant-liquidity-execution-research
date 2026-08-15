@@ -683,6 +683,33 @@ class LiveBridgeTest(unittest.TestCase):
             self.assertFalse(report["order_submission_attempted"])
             self.assertEqual(len(output.read_text(encoding="utf-8").splitlines()), 2)
 
+    def test_quote_collector_rejects_out_of_order_or_unrequested_stream_events(self) -> None:
+        fixture_quote, fixture_now = self.quote, self.now
+
+        class FakeClient:
+            def __init__(self, quotes: list[Quote]) -> None:
+                self.quotes = quotes
+
+            async def stream_quotes(self, symbols: list[str], *, max_reconnects: int) -> object:
+                for quote in self.quotes:
+                    yield quote
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "quotes.jsonl"
+            client = FakeClient([
+                replace(fixture_quote, timestamp=fixture_now),
+                replace(fixture_quote, timestamp=fixture_now - timedelta(seconds=1)),
+            ])
+            with self.assertRaises(MarketDataError):
+                asyncio.run(collect_quotes(client, ["SPY"], JsonlEventStore(output),
+                                           max_quotes=2, timeout_seconds=5))
+            self.assertEqual(len(output.read_text(encoding="utf-8").splitlines()), 1)
+
+            wrong_symbol = FakeClient([replace(fixture_quote, symbol="QQQ")])
+            with self.assertRaises(MarketDataError):
+                asyncio.run(collect_quotes(wrong_symbol, ["SPY"], JsonlEventStore(output),
+                                           max_quotes=1, timeout_seconds=5))
+
     def test_bar_schema_rejects_invalid_provider_payload(self) -> None:
         with self.assertRaises(MarketDataError):
             Bar.from_alpaca("SPY", {"t": "2026-01-02T14:30:00Z", "o": 100, "h": 99, "l": 101, "c": 100, "v": 1})
