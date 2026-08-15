@@ -34,7 +34,8 @@ python live/preflight.py --symbol SPY --max-training-gap-hours 168 \
 ```
 
 Preflight reads the model, completed bars, quote, account/position/open-order/
-buying-power state, and broker market clock. It never creates an order. A closed market is
+buying-power state, broker market clock, and the validated exchange trading calendar
+(including early-close sessions). It never creates an order. A closed market is
 reported as a normal state; malformed or unavailable state fails the check.
 
 ## Stage 2: causal evaluation and promotion
@@ -90,7 +91,7 @@ submission rejects a missing, stale, mixed-model, symbol-mismatched, or failed
 report.
 
 Use the combined read-only health snapshot as the machine-checkable session
-gate. It verifies the model, live data, broker state, market clock, fresh
+gate. It verifies the model, live data, broker state, market clock/calendar, fresh
 quality report, and decision-journal integrity without submitting:
 
 ```bash
