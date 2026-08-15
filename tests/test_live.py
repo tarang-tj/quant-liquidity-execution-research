@@ -663,6 +663,16 @@ class LiveBridgeTest(unittest.TestCase):
         with patch.object(broker, "_get_json", return_value=[{"date": "bad", "open": "", "close": ""}]):
             with self.assertRaises(MarketDataError):
                 broker.trading_calendar(datetime(2026, 1, 1).date(), datetime(2026, 1, 3).date())
+        with patch.object(broker, "_get_json", return_value=[
+            {"date": "2026-01-02", "open": "not-a-time", "close": "16:00"},
+        ]):
+            with self.assertRaises(MarketDataError):
+                broker.trading_calendar(datetime(2026, 1, 1).date(), datetime(2026, 1, 3).date())
+        with patch.object(broker, "_get_json", return_value=[
+            {"date": "2026-01-02", "open": "16:00", "close": "09:30"},
+        ]):
+            with self.assertRaises(MarketDataError):
+                broker.trading_calendar(datetime(2026, 1, 1).date(), datetime(2026, 1, 3).date())
 
     def test_reconciliation_uses_fixed_paper_endpoint(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")

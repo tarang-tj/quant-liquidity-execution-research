@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time
 from math import isfinite
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -128,7 +128,10 @@ class AlpacaPaperBroker:
                 session_date = date.fromisoformat(str(session["date"]))
                 open_time = str(session["open"])
                 close_time = str(session["close"])
-                if not open_time or not close_time or not start <= session_date <= end:
+                parsed_open = time.fromisoformat(open_time)
+                parsed_close = time.fromisoformat(close_time)
+                if (not open_time or not close_time or not start <= session_date <= end
+                        or parsed_open >= parsed_close):
                     raise ValueError("invalid session range or times")
             except (KeyError, TypeError, ValueError) as exc:
                 raise MarketDataError("paper calendar session is malformed") from exc
