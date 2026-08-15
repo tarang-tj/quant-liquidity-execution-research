@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
 from pathlib import Path
 import json
 import hashlib
+import tempfile
 from datetime import datetime, timezone
 
 import numpy as np
@@ -105,7 +107,35 @@ class LogisticDirectionModel:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"feature_mean": self.feature_mean.tolist(), "feature_scale": self.feature_scale.tolist(),
                    "weights": self.weights.tolist(), "intercept": self.intercept, "report": asdict(self.report)}
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        encoded = json.dumps(payload, indent=2)
+        temporary_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                             prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
+                temporary_path = handle.name
+                handle.write(encoded)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, path)
+            temporary_path = None
+            # Persist the directory entry as well as the file contents.  This
+            # matters when a host loses power immediately after model rotation.
+            try:
+                directory_fd = os.open(path.parent, os.O_RDONLY)
+            except OSError:
+                directory_fd = None
+            if directory_fd is not None:
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+        finally:
+            if temporary_path is not None:
+                try:
+                    os.unlink(temporary_path)
+                except FileNotFoundError:
+                    pass
 
     @classmethod
     def from_json(cls, path: Path) -> "LogisticDirectionModel":

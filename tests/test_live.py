@@ -94,6 +94,22 @@ class LiveBridgeTest(unittest.TestCase):
             legacy = LogisticDirectionModel.from_json(path)
             self.assertIsNone(legacy.report.training_data_sha256)
 
+    def test_model_rotation_is_atomic_and_preserves_previous_artifact_on_failure(self) -> None:
+        model = train_direction_model(self.bars)
+        replacement = train_direction_model(self.bars, iterations=2)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            model.to_json(path)
+            previous_bytes = path.read_bytes()
+            with patch("live.predictor.os.replace", side_effect=OSError("simulated rotation failure")):
+                with self.assertRaises(OSError):
+                    replacement.to_json(path)
+            self.assertEqual(path.read_bytes(), previous_bytes)
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+            restored = LogisticDirectionModel.from_json(path)
+            self.assertAlmostEqual(restored.predict_probability(live_features(self.bars)),
+                                   model.predict_probability(live_features(self.bars)))
+
     def test_read_only_preflight_checks_data_model_and_paper_broker(self) -> None:
         model = train_direction_model(self.bars)
         deployable = replace(model, report=replace(model.report, validation_observations=100, deployable_for_paper=True))
