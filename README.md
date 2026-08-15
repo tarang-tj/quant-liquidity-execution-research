@@ -102,6 +102,16 @@ not the midpoint; order submission has no automatic retry path.
      --max-bar-gap-minutes 3
    ```
 
+   To avoid forcing a trade when the directional model is nearly indifferent,
+   set a minimum probability edge. For example, `--min-direction-edge 0.05`
+   journals a `hold` decision whenever the forecast is between 45% and 55%;
+   a hold is never submitted and the default `0.0` preserves the baseline
+   threshold behavior:
+
+   ```bash
+   python live/run_paper.py --symbol SPY --min-direction-edge 0.05
+   ```
+
    Before the first evaluation, run the read-only readiness preflight. It reads
    the model, live data, paper account/risk/buying-power snapshot, and broker market clock
    but never creates an order:
@@ -117,7 +127,8 @@ not the midpoint; order submission has no automatic retry path.
 
    ```bash
    python live/paper_monitor.py --symbol SPY --iterations 30 --interval-seconds 60 \
-     --max-training-gap-hours 168 --max-bar-gap-minutes 3
+     --max-training-gap-hours 168 --max-bar-gap-minutes 3 \
+     --min-direction-edge 0.05
    ```
 
    The optional freshness SLA makes each path fail closed when the latest

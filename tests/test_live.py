@@ -22,7 +22,8 @@ from live.market_data import AlpacaMarketDataClient, Bar, MarketDataError, Quote
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker, PaperRiskState
 from live.predictor import (LogisticDirectionModel, causal_training_matrix, live_features,
-                            train_direction_model, training_config_sha256, training_data_sha256,
+                            direction_from_probability, train_direction_model, training_config_sha256,
+                            training_data_sha256,
                             validate_model_data_alignment)
 from live.predictor import validate_paper_model
 from live.preflight import run_preflight
@@ -104,6 +105,19 @@ class LiveBridgeTest(unittest.TestCase):
             path.write_text(json.dumps(raw), encoding="utf-8")
             legacy = LogisticDirectionModel.from_json(path)
             self.assertIsNone(legacy.report.training_data_sha256)
+
+    def test_direction_gate_abstains_only_with_a_configured_edge(self) -> None:
+        self.assertEqual(direction_from_probability(0.80), "buy")
+        self.assertEqual(direction_from_probability(0.20), "sell")
+        self.assertEqual(direction_from_probability(0.50), "buy")
+        self.assertEqual(direction_from_probability(0.52, 0.05), "hold")
+        self.assertEqual(direction_from_probability(0.55, 0.05), "hold")
+        self.assertEqual(direction_from_probability(0.56, 0.05), "buy")
+        self.assertEqual(direction_from_probability(0.44, 0.05), "sell")
+        with self.assertRaises(ValueError):
+            direction_from_probability(0.5, 0.5)
+        with self.assertRaises(ValueError):
+            direction_from_probability(float("nan"), 0.05)
 
     def test_model_rotation_is_atomic_and_preserves_previous_artifact_on_failure(self) -> None:
         model = train_direction_model(self.bars)
