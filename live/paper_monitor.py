@@ -24,7 +24,7 @@ if __package__ in {None, ""}:
 from live.audit import PaperDecision, PaperDecisionLog, file_sha256
 from live.market_data import AlpacaMarketDataClient
 from live.paper_broker import AlpacaPaperBroker
-from live.predictor import LogisticDirectionModel, live_features
+from live.predictor import LogisticDirectionModel, live_features, validate_paper_model
 from live.risk import OrderIntent, RiskLimits, validate_paper_order
 
 
@@ -46,8 +46,7 @@ def evaluate_read_only_once(
 ) -> dict[str, object]:
     """Fetch one fresh snapshot, score it, and append evidence without POSTing."""
     active_model = model or LogisticDirectionModel.from_json(model_path)
-    if not active_model.report.deployable_for_paper:
-        raise ValueError("model did not pass the minimum chronological paper-research quality gate")
+    validate_paper_model(active_model, symbol)
     if expected_model_hash is not None and file_sha256(model_path) != expected_model_hash:
         raise RuntimeError("model file changed during monitor; refusing to mix model versions")
     quote = data_client.latest_quote(symbol)
@@ -132,8 +131,7 @@ def run_monitor(
     # instead of labeling version A predictions as version B evidence.
     pinned_model_hash = file_sha256(model_path)
     model = LogisticDirectionModel.from_json(model_path)
-    if not model.report.deployable_for_paper:
-        raise ValueError("model did not pass the minimum chronological paper-research quality gate")
+    validate_paper_model(model, symbol)
     if file_sha256(model_path) != pinned_model_hash:
         raise RuntimeError("model file changed during monitor startup; refusing to mix model versions")
     samples: list[dict[str, object]] = []

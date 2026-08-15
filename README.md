@@ -50,7 +50,9 @@ predictions use only completed minute bars, never the in-progress bar.
 2. Train using historical bars. The command below fetches bars only when data
    credentials are present; `--input` supports an offline CSV with
    `timestamp,open,high,low,close,volume` for reproducible tests. A bundled
-   format fixture verifies the offline path:
+   format fixture verifies the offline path. Each model artifact records its
+   symbol, timeframe, UTC training range, exact ordered-bar SHA-256, and fit
+   configuration hash so a later promotion can be traced to its inputs:
 
    ```bash
    python live/train_predictor.py --symbol SPY --bars 1000

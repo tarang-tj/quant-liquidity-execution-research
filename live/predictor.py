@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 import json
+import hashlib
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -18,6 +20,13 @@ class ModelReport:
     validation_accuracy: float
     validation_brier: float
     deployable_for_paper: bool
+    training_symbol: str | None = None
+    training_timeframe: str | None = None
+    training_start: str | None = None
+    training_end: str | None = None
+    training_data_sha256: str | None = None
+    training_config_sha256: str | None = None
+    created_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +46,35 @@ class LogisticDirectionModel:
                 type(self.report.validation_brier) not in (int, float) or
                 type(self.report.deployable_for_paper) is not bool):
             raise ValueError("model report fields have invalid primitive types")
+        optional_text = (self.report.training_symbol, self.report.training_timeframe,
+                         self.report.training_start, self.report.training_end,
+                         self.report.training_data_sha256, self.report.training_config_sha256,
+                         self.report.created_at)
+        if any(value is not None and type(value) is not str for value in optional_text):
+            raise ValueError("model provenance fields must be strings or null")
+        if self.report.training_symbol is not None and not self.report.training_symbol.strip():
+            raise ValueError("training_symbol must not be empty")
+        if self.report.training_timeframe is not None and not self.report.training_timeframe.strip():
+            raise ValueError("training_timeframe must not be empty")
+        for name, digest in (("training_data_sha256", self.report.training_data_sha256),
+                             ("training_config_sha256", self.report.training_config_sha256)):
+            if digest is not None and (len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)):
+                raise ValueError(f"{name} must be a lowercase SHA-256 digest")
+        parsed_times: dict[str, datetime] = {}
+        for name, value in (("training_start", self.report.training_start),
+                            ("training_end", self.report.training_end),
+                            ("created_at", self.report.created_at)):
+            if value is not None:
+                try:
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError as exc:
+                    raise ValueError(f"{name} must be an ISO-8601 timestamp") from exc
+                if parsed.tzinfo is None:
+                    raise ValueError(f"{name} must include a timezone")
+                parsed_times[name] = parsed
+        if ("training_start" in parsed_times and "training_end" in parsed_times and
+                parsed_times["training_start"] > parsed_times["training_end"]):
+            raise ValueError("training_start must not be later than training_end")
         arrays = (self.feature_mean, self.feature_scale, self.weights)
         if any(not isinstance(array, np.ndarray) or array.shape != (4,) for array in arrays):
             raise ValueError("model parameters must be three four-element arrays")
@@ -96,8 +134,16 @@ class LogisticDirectionModel:
 
 def causal_training_matrix(bars: list[Bar], lookback: int = 20) -> tuple[np.ndarray, np.ndarray]:
     """Features at bar t; label is the return from t to t+1. No future values leak into X."""
+    if not isinstance(lookback, int) or isinstance(lookback, bool) or lookback < 5:
+        raise ValueError("lookback must be an integer of at least 5 bars")
     if len(bars) < lookback + 3:
         raise ValueError(f"need at least {lookback + 3} bars")
+    symbols = {bar.symbol.upper() for bar in bars}
+    if len(symbols) != 1:
+        raise ValueError("training bars must contain exactly one symbol")
+    timestamps = [bar.timestamp.astimezone(timezone.utc) for bar in bars]
+    if any(left >= right for left, right in zip(timestamps, timestamps[1:])):
+        raise ValueError("training bars must be strictly chronological with unique timestamps")
     closes = np.asarray([bar.close for bar in bars], dtype=float)
     volumes = np.asarray([bar.volume for bar in bars], dtype=float)
     if np.any(closes <= 0) or np.any(volumes < 0):
@@ -114,9 +160,49 @@ def causal_training_matrix(bars: list[Bar], lookback: int = 20) -> tuple[np.ndar
     return np.asarray(rows, dtype=float), np.asarray(targets, dtype=float)
 
 
+def training_data_sha256(bars: list[Bar]) -> str:
+    """Hash the ordered normalized bars used to fit a model."""
+    digest = hashlib.sha256()
+    for bar in bars:
+        record = (bar.symbol.upper(), bar.timestamp.astimezone(timezone.utc).isoformat(),
+                  bar.open, bar.high, bar.low, bar.close, bar.volume)
+        digest.update(json.dumps(record, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def training_config_sha256(*, lookback: int, validation_fraction: float, learning_rate: float,
+                           iterations: int, l2: float, timeframe: str) -> str:
+    """Hash the feature and fitting configuration bound to a model artifact."""
+    config = {"schema": "causal-logistic-v1", "lookback": lookback,
+              "validation_fraction": validation_fraction, "learning_rate": learning_rate,
+              "iterations": iterations, "l2": l2, "timeframe": timeframe}
+    return hashlib.sha256(json.dumps(config, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                         .encode("utf-8")).hexdigest()
+
+
+def validate_paper_model(model: LogisticDirectionModel, symbol: str, timeframe: str = "1Min") -> None:
+    """Require a deployable artifact whose provenance matches the live paper feed."""
+    report = model.report
+    if not report.deployable_for_paper:
+        raise ValueError("model did not pass the minimum chronological paper-research quality gate")
+    expected_symbol = symbol.upper()
+    if report.training_symbol != expected_symbol:
+        raise ValueError("model training symbol does not match the requested paper symbol")
+    if report.training_timeframe != timeframe:
+        raise ValueError("model training timeframe does not match the live paper feed")
+    if any(value is None for value in (report.training_start, report.training_end,
+                                       report.training_data_sha256, report.training_config_sha256,
+                                       report.created_at)):
+        raise ValueError("model lacks complete training provenance for paper evaluation")
+
+
 def train_direction_model(bars: list[Bar], lookback: int = 20, validation_fraction: float = 0.30,
-                          learning_rate: float = 0.08, iterations: int = 1_500, l2: float = 0.02) -> LogisticDirectionModel:
+                          learning_rate: float = 0.08, iterations: int = 1_500, l2: float = 0.02,
+                          timeframe: str = "1Min") -> LogisticDirectionModel:
     """Chronological train/validation split with deterministic full-batch logistic fitting."""
+    if not isinstance(timeframe, str) or not timeframe.strip():
+        raise ValueError("timeframe must be a non-empty string")
     x, y = causal_training_matrix(bars, lookback)
     split = int(len(x) * (1 - validation_fraction))
     if split < 30 or len(x) - split < 20:
@@ -136,8 +222,20 @@ def train_direction_model(bars: list[Bar], lookback: int = 20, validation_fracti
     probability = 1 / (1 + np.exp(-val_scores))
     accuracy = float(((probability >= .5) == y_val).mean())
     brier = float(np.mean((probability - y_val) ** 2))
-    report = ModelReport(len(x_train), len(x_val), accuracy, brier,
-                         bool(len(x_val) >= 100 and accuracy >= .52 and brier < .25))
+    report = ModelReport(
+        len(x_train), len(x_val), accuracy, brier,
+        bool(len(x_val) >= 100 and accuracy >= .52 and brier < .25),
+        training_symbol=bars[0].symbol.upper(),
+        training_timeframe=timeframe,
+        training_start=bars[0].timestamp.astimezone(timezone.utc).isoformat(),
+        training_end=bars[-1].timestamp.astimezone(timezone.utc).isoformat(),
+        training_data_sha256=training_data_sha256(bars),
+        training_config_sha256=training_config_sha256(
+            lookback=lookback, validation_fraction=validation_fraction, learning_rate=learning_rate,
+            iterations=iterations, l2=l2, timeframe=timeframe,
+        ),
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
     return LogisticDirectionModel(mean, scale, weights, float(intercept), report)
 
 

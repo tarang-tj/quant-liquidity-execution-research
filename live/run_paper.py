@@ -17,7 +17,7 @@ if __package__ in {None, ""}:
 from live.market_data import AlpacaMarketDataClient, JsonlEventStore
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker
-from live.predictor import LogisticDirectionModel, live_features
+from live.predictor import LogisticDirectionModel, live_features, validate_paper_model
 from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
 
 
@@ -93,8 +93,7 @@ def main() -> None:
     JsonlEventStore(ROOT / "runtime" / "quotes.jsonl").append_quotes([quote])
     model_path = args.model or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"
     model = LogisticDirectionModel.from_json(model_path)
-    if not model.report.deployable_for_paper:
-        raise SystemExit("model did not pass the minimum chronological paper-research quality gate")
+    validate_paper_model(model, args.symbol)
     bars = client.bars(args.symbol, args.history_bars)
     features = live_features(bars)
     probability = model.predict_probability(features)

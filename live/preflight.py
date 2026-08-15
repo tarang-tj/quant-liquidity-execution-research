@@ -14,7 +14,7 @@ if __package__ in {None, ""}:
 
 from live.market_data import AlpacaMarketDataClient
 from live.paper_broker import AlpacaPaperBroker
-from live.predictor import LogisticDirectionModel
+from live.predictor import LogisticDirectionModel, validate_paper_model
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,10 +32,8 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
     model: LogisticDirectionModel | None = None
     try:
         model = LogisticDirectionModel.from_json(model_path)
-        if not model.report.deployable_for_paper:
-            checks.append(_result("model", False, "model did not pass chronological paper-research gate"))
-        else:
-            checks.append(_result("model", True, "chronological validation gate passed"))
+        validate_paper_model(model, symbol)
+        checks.append(_result("model", True, "chronological validation and provenance gate passed"))
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         checks.append(_result("model", False, f"model unavailable or invalid: {type(exc).__name__}"))
 

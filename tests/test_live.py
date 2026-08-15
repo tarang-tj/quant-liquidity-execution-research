@@ -18,7 +18,9 @@ import numpy as np
 from live.market_data import AlpacaMarketDataClient, Bar, MarketDataError, Quote
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker, PaperRiskState
-from live.predictor import LogisticDirectionModel, causal_training_matrix, live_features, train_direction_model
+from live.predictor import (LogisticDirectionModel, causal_training_matrix, live_features,
+                            train_direction_model, training_config_sha256, training_data_sha256)
+from live.predictor import validate_paper_model
 from live.preflight import run_preflight
 from live.paper_monitor import run_monitor
 from live.reconcile_paper import record_reconciliation_result
@@ -67,12 +69,29 @@ class LiveBridgeTest(unittest.TestCase):
         model = train_direction_model(self.bars)
         self.assertEqual(model.feature_mean.shape, (4,))
         self.assertGreaterEqual(model.report.validation_observations, 20)
+        self.assertEqual(model.report.training_symbol, "SPY")
+        self.assertEqual(model.report.training_timeframe, "1Min")
+        self.assertEqual(model.report.training_start, self.bars[0].timestamp.isoformat())
+        self.assertEqual(model.report.training_end, self.bars[-1].timestamp.isoformat())
+        self.assertEqual(model.report.training_data_sha256, training_data_sha256(self.bars))
+        self.assertEqual(model.report.training_config_sha256, training_config_sha256(
+            lookback=20, validation_fraction=.30, learning_rate=.08, iterations=1_500, l2=.02,
+            timeframe="1Min"))
+        self.assertEqual(len(model.report.training_data_sha256), 64)
         self.assertTrue(0 <= model.predict_probability(live_features(self.bars)) <= 1)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model.json"
             model.to_json(path)
             restored = LogisticDirectionModel.from_json(path)
             self.assertAlmostEqual(model.predict_probability(x[-1]), restored.predict_probability(x[-1]))
+
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            for key in ("training_symbol", "training_timeframe", "training_start", "training_end",
+                        "training_data_sha256", "training_config_sha256", "created_at"):
+                raw["report"].pop(key)
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            legacy = LogisticDirectionModel.from_json(path)
+            self.assertIsNone(legacy.report.training_data_sha256)
 
     def test_read_only_preflight_checks_data_model_and_paper_broker(self) -> None:
         model = train_direction_model(self.bars)
@@ -136,6 +155,30 @@ class LiveBridgeTest(unittest.TestCase):
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaises(ValueError):
                 LogisticDirectionModel.from_json(path)
+
+    def test_model_deserialization_rejects_invalid_provenance(self) -> None:
+        model = train_direction_model(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            model.to_json(path)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw["report"]["training_data_sha256"] = "not-a-digest"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                LogisticDirectionModel.from_json(path)
+            model.to_json(path)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw["report"]["training_start"] = "2026-01-02T14:30:00"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                LogisticDirectionModel.from_json(path)
+            model.to_json(path)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw["report"]["training_start"], raw["report"]["training_end"] = (
+                raw["report"]["training_end"], raw["report"]["training_start"])
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                LogisticDirectionModel.from_json(path)
             model.to_json(path)
             raw = json.loads(path.read_text(encoding="utf-8"))
             raw["report"]["validation_observations"] = 100
@@ -160,6 +203,30 @@ class LiveBridgeTest(unittest.TestCase):
                           last.close * 10, last.volume * 10)
         candidate, _ = causal_training_matrix(changed)
         np.testing.assert_allclose(baseline[:-1], candidate[:-1], atol=0, rtol=0)
+
+    def test_training_rejects_mixed_or_nonchronological_bars(self) -> None:
+        mixed = self.bars.copy()
+        mixed[0] = Bar("QQQ", mixed[0].timestamp, mixed[0].open, mixed[0].high,
+                       mixed[0].low, mixed[0].close, mixed[0].volume)
+        with self.assertRaises(ValueError):
+            train_direction_model(mixed)
+        unsorted = self.bars.copy()
+        unsorted[0], unsorted[1] = unsorted[1], unsorted[0]
+        with self.assertRaises(ValueError):
+            train_direction_model(unsorted)
+
+    def test_paper_model_requires_matching_complete_provenance(self) -> None:
+        model = train_direction_model(self.bars)
+        with self.assertRaises(ValueError):
+            validate_paper_model(model, "QQQ")
+        with self.assertRaises(ValueError):
+            validate_paper_model(model, "SPY", "5Min")
+        legacy_report = replace(model.report, training_symbol=None, training_timeframe=None,
+                                training_start=None, training_end=None, training_data_sha256=None,
+                                training_config_sha256=None, created_at=None)
+        legacy = replace(model, report=legacy_report)
+        with self.assertRaises(ValueError):
+            validate_paper_model(legacy, "SPY")
 
     def test_risk_gates_are_fail_closed(self) -> None:
         allowed = validate_paper_order(OrderIntent("SPY", "buy", 2), self.quote, 0, 0, RiskLimits(), self.now)
