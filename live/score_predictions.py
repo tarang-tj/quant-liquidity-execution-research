@@ -44,15 +44,22 @@ def _summary(scored: list[tuple[PaperDecision, Bar, float]]) -> dict[str, object
     }
 
 
-def score_predictions(decisions: Iterable[PaperDecision], bars: Iterable[Bar]) -> dict[str, object]:
+def score_predictions(decisions: Iterable[PaperDecision], bars: Iterable[Bar],
+                      symbol: str | None = None) -> dict[str, object]:
     """Return causal quality metrics and pending counts for journaled decisions."""
     ordered_bars = sorted(bars, key=lambda bar: bar.timestamp)
-    by_timestamp = {bar.timestamp: bar for bar in ordered_bars}
+    by_key = {(bar.symbol.upper(), bar.timestamp): bar for bar in ordered_bars}
+    target_symbol = symbol.upper() if symbol is not None else None
     scored: list[tuple[PaperDecision, Bar, float]] = []
     pending = 0
     invalid = 0
+    symbol_mismatch = 0
     for decision in decisions:
         if decision.event_kind != "decision":
+            continue
+        decision_symbol = decision.symbol.upper()
+        if target_symbol is not None and decision_symbol != target_symbol:
+            symbol_mismatch += 1
             continue
         if not decision.completed_bars:
             invalid += 1
@@ -73,7 +80,7 @@ def score_predictions(decisions: Iterable[PaperDecision], bars: Iterable[Bar]) -
             invalid += 1
             continue
         expected_timestamp = cutoff.astimezone(timezone.utc) + timedelta(minutes=1)
-        next_bar = by_timestamp.get(expected_timestamp)
+        next_bar = by_key.get((decision_symbol, expected_timestamp))
         if next_bar is None:
             pending += 1
             continue
@@ -83,7 +90,8 @@ def score_predictions(decisions: Iterable[PaperDecision], bars: Iterable[Bar]) -
             continue
         scored.append((decision, next_bar, return_bps))
     result = _summary(scored)
-    result.update({"pending": pending, "invalid": invalid, "available_bars": len(ordered_bars)})
+    result.update({"pending": pending, "invalid": invalid, "symbol_mismatch": symbol_mismatch,
+                   "available_bars": len(ordered_bars)})
     return result
 
 
@@ -91,8 +99,10 @@ def apply_quality_gate(metrics: dict[str, object], *, minimum_scored: int = 20,
                        minimum_accuracy: float = 0.52, maximum_brier: float = 0.25) -> dict[str, object]:
     """Attach an explicit evidence gate used by scheduled monitoring."""
     if (type(minimum_scored) is not int or minimum_scored < 1 or
-            not isfinite(minimum_accuracy) or not 0 <= minimum_accuracy <= 1 or
-            not isfinite(maximum_brier) or not 0 <= maximum_brier <= 1):
+            type(minimum_accuracy) not in (int, float) or
+            not isfinite(float(minimum_accuracy)) or not 0 <= minimum_accuracy <= 1 or
+            type(maximum_brier) not in (int, float) or
+            not isfinite(float(maximum_brier)) or not 0 <= maximum_brier <= 1):
         raise ValueError("invalid live-quality thresholds")
     scored = metrics.get("scored")
     accuracy = metrics.get("accuracy")
@@ -128,7 +138,7 @@ def main() -> None:
     decisions = PaperDecisionLog(args.decision_log).read()
     bars = AlpacaMarketDataClient(feed=args.feed).bars(args.symbol, limit=args.bars)
     report = apply_quality_gate(
-        score_predictions(decisions, bars), minimum_scored=args.minimum_scored,
+        score_predictions(decisions, bars, symbol=args.symbol), minimum_scored=args.minimum_scored,
         minimum_accuracy=args.minimum_accuracy, maximum_brier=args.maximum_brier,
     )
     print(json.dumps(report, sort_keys=True))
