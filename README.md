@@ -63,6 +63,15 @@ predictions use only completed minute bars, never the in-progress bar.
    python live/train_predictor.py --symbol SPY --input tests/fixtures/spy_bars.csv --output /tmp/spy_model.json
    ```
 
+   For recurring retraining, use the promotion gate instead of overwriting the
+   active model directly. It leaves the existing artifact untouched unless the
+   candidate passes chronological validation, walk-forward accuracy/Brier, and
+   cost-aware net-return thresholds:
+
+   ```bash
+   python live/promote_model.py --symbol SPY --bars 1000 --target models/SPY_logistic.json
+   ```
+
    Before considering a model for paper use, run a causal walk-forward check.
    Each block is fit only on bars strictly before that block; the result also
    reports a majority-class baseline, gross/net return in basis points,

@@ -23,6 +23,7 @@ from live.predictor import (LogisticDirectionModel, causal_training_matrix, live
 from live.predictor import validate_paper_model
 from live.preflight import run_preflight
 from live.paper_monitor import run_monitor
+from live.promote_model import promote_if_qualified
 from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record
@@ -109,6 +110,20 @@ class LiveBridgeTest(unittest.TestCase):
             restored = LogisticDirectionModel.from_json(path)
             self.assertAlmostEqual(restored.predict_probability(live_features(self.bars)),
                                    model.predict_probability(live_features(self.bars)))
+
+    def test_failed_model_promotion_preserves_active_artifact(self) -> None:
+        model = train_direction_model(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "active.json"
+            model.to_json(target)
+            previous_bytes = target.read_bytes()
+            report = promote_if_qualified(
+                self.bars, symbol="SPY", target_path=target, training_bars=120,
+                evaluation_bars=20, minimum_accuracy=1.0, minimum_net_return_bps=1e12,
+            )
+            self.assertFalse(report["promoted"])
+            self.assertEqual(target.read_bytes(), previous_bytes)
+            self.assertIn("rejection_reason", report)
 
     def test_read_only_preflight_checks_data_model_and_paper_broker(self) -> None:
         model = train_direction_model(self.bars)
