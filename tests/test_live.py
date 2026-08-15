@@ -27,6 +27,7 @@ from live.predictor import (LogisticDirectionModel, causal_training_matrix, live
                             validate_model_data_alignment)
 from live.predictor import validate_paper_model
 from live.preflight import run_preflight
+from live.health import run_health
 from live.paper_monitor import run_monitor
 from live.promote_model import promote_if_qualified
 from live.reconcile_paper import record_reconciliation_result
@@ -179,6 +180,39 @@ class LiveBridgeTest(unittest.TestCase):
                     validate_quality_report(report_path, symbol="SPY",
                                             model_sha256=report["model_sha256"], now=self.now,
                                             max_age_seconds=60)
+
+    def test_health_snapshot_requires_quality_and_valid_journal_without_submission(self) -> None:
+        model = train_direction_model(self.bars)
+        deployable = replace(model, report=replace(model.report, validation_observations=100,
+                                                   deployable_for_paper=True))
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, report_path, log_path = folder / "model.json", folder / "quality.json", folder / "decisions.jsonl"
+            deployable.to_json(model_path)
+            decision = PaperDecision.create(
+                model_path=model_path, symbol="SPY", quote=self.quote, bars=self.bars,
+                features=live_features(self.bars).tolist(), probability=.8, side="buy",
+                risk_approved=False, risk_reason="fixture", risk_source="fixture",
+                broker_position=0, broker_daily_pnl=0,
+            )
+            journal = PaperDecisionLog(log_path)
+            committed = journal.append(decision)
+            report = build_quality_report([committed], {"scored": 1, "accuracy": 1.0, "brier": 0.0},
+                                          symbol="SPY", minimum_scored=1,
+                                          generated_at=datetime.now(timezone.utc))
+            write_quality_report(report, report_path)
+            data_client = unittest.mock.Mock()
+            data_client.latest_quote.return_value = self.quote
+            data_client.bars.return_value = self.bars[-100:]
+            broker = unittest.mock.Mock()
+            broker.risk_state.return_value = PaperRiskState(0, 0, 0, 0, 1_000)
+            broker.market_clock.return_value = True
+            health = run_health("SPY", model_path, report_path, log_path,
+                                data_client=data_client, broker=broker)
+            self.assertTrue(health["ready_for_paper_session"])
+            self.assertTrue(health["paper_only"])
+            self.assertFalse(health["order_submission_attempted"])
+            self.assertTrue(all(check["ok"] for check in health["checks"]))
 
     def test_model_rotation_is_atomic_and_preserves_previous_artifact_on_failure(self) -> None:
         model = train_direction_model(self.bars)
