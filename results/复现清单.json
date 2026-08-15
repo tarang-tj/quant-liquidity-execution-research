@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "random_seed": 20260814,
+  "input_files": [
+    {
+      "path": "data/synthetic_market.csv",
+      "sha256": "b77695d644e211dfa4cabd9ba503c7487c84e171668b1802e511842d85ae31fd",
+      "bytes": 1546152
+    }
+  ],
+  "runtime": {
+    "name": "python",
+    "version": "3.12.7",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "dependencies": {
+      "numpy": "1.26.4",
+      "pandas": "2.2.2",
+      "scipy": "1.13.1",
+      "matplotlib": "3.9.2"
+    }
+  },
+  "key_parameters": {
+    "seed": 20260814,
+    "paths": 1200,
+    "horizon": 13,
+    "parent_order": 100000,
+    "p00": 0.94,
+    "p11": 0.82,
+    "eta_calm": 7.0,
+    "eta_stress": 24.0,
+    "sigma_calm": 5.0,
+    "sigma_stress": 10.0,
+    "capacity_floor": 0.09,
+    "risk_aversion": 0.08,
+    "bootstrap_reps": 500,
+    "literature_search": {
+      "date": "2026-08-14",
+      "query": "optimal execution Almgren Chriss regime switching liquidity risk",
+      "openalex_candidates": 20,
+      "anysearch_candidates": 10,
+      "cross_validated": 7
+    }
+  },
+  "reproduce_command": "python -m unittest discover -s tests -v && python run_research.py --mode full --seed 20260814 && python run_sensitivity.py --paths 150 --seed 20260814 && python run_stress_test.py --paths 300 --seed 20260814 && python run_continual_learning.py --mode full --seed 20260814 && python make_figures.py"
+}

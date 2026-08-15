@@ -1,0 +1,24 @@
+{
+  "mode": "full",
+  "params": {
+    "seed": 20260814,
+    "paths": 1200,
+    "horizon": 13,
+    "parent_order": 100000,
+    "p00": 0.94,
+    "p11": 0.82,
+    "eta_calm": 7.0,
+    "eta_stress": 24.0,
+    "sigma_calm": 5.0,
+    "sigma_stress": 10.0,
+    "capacity_floor": 0.09,
+    "risk_aversion": 0.08,
+    "bootstrap_reps": 500
+  },
+  "q1": {
+    "accuracy": 0.9401282051282052,
+    "balanced_accuracy": 0.906200992323402,
+    "brier_score": 0.04448112190073768,
+    "log_loss": 0.15563213749231633
+  }
+}

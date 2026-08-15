@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="453.6pt" height="252pt" viewBox="0 0 453.6 252" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-14T22:45:56.904181</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.9.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 252 
+L 453.6 252 
+L 453.6 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 39.484615 224.781791 
+L 450.59976 224.781791 
+L 450.59976 12.82399 
+L 39.484615 12.82399 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="QuadMesh_1">
+    <path d="M 39.484615 12.82399 
+L 245.042187 12.82399 
+L 245.042187 118.802891 
+L 39.484615 118.802891 
+L 39.484615 12.82399 
+" clip-path="url(#p61fa7cbbbe)" style="fill: #08306b"/>
+    <path d="M 245.042187 12.82399 
+L 450.59976 12.82399 
+L 450.59976 118.802891 
+L 245.042187 118.802891 
+L 245.042187 12.82399 
+" clip-path="url(#p61fa7cbbbe)" style="fill: #f7fbff"/>
+    <path d="M 39.484615 118.802891 
+L 245.042187 118.802891 
+L 245.042187 224.781791 
+L 39.484615 224.781791 
+L 39.484615 118.802891 
+" clip-path="url(#p61fa7cbbbe)" style="fill: #f2f8fd"/>
+    <path d="M 245.042187 118.802891 
+L 450.59976 118.802891 
+L 450.59976 224.781791 
+L 245.042187 224.781791 
+L 245.042187 118.802891 
+" clip-path="url(#p61fa7cbbbe)" style="fill: #c3daee"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <defs>
+       <path id="mf9d5cc192c" d="M 0 0 
+L 0 3 
+" style="stroke: #000000; stroke-width: 0.6"/>
+      </defs>
+      <g>
+       <use xlink:href="#mf9d5cc192c" x="142.263401" y="224.781791" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font: 7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="142.263401" y="236.29226" transform="rotate(-0 142.263401 236.29226)">calm</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_2">
+      <g>
+       <use xlink:href="#mf9d5cc192c" x="347.820974" y="224.781791" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font: 7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="347.820974" y="236.29226" transform="rotate(-0 347.820974 236.29226)">stress</text>
+     </g>
+    </g>
+    <g id="text_3">
+     <text style="font: 8px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="245.042187" y="247.40976" transform="rotate(-0 245.042187 247.40976)">predicted state</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_3">
+      <defs>
+       <path id="m40ecca7444" d="M 0 0 
+L -3 0 
+" style="stroke: #000000; stroke-width: 0.6"/>
+      </defs>
+      <g>
+       <use xlink:href="#m40ecca7444" x="39.484615" y="65.81344" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font: 7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: end" x="32.984615" y="68.318675" transform="rotate(-0 32.984615 68.318675)">calm</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#m40ecca7444" x="39.484615" y="171.792341" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font: 7px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: end" x="32.984615" y="174.297575" transform="rotate(-0 32.984615 174.297575)">stress</text>
+     </g>
+    </g>
+    <g id="text_6">
+     <text style="font: 8px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="8.72649" y="118.802891" transform="rotate(-90 8.72649 118.802891)">true state</text>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 39.484615 224.781791 
+L 39.484615 12.82399 
+" style="fill: none; stroke: #000000; stroke-width: 0.7; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 39.484615 224.781791 
+L 450.59976 224.781791 
+" style="fill: none; stroke: #000000; stroke-width: 0.7; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_7">
+    <text style="font: 7.5px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="142.263401" y="67.752307" transform="rotate(-0 142.263401 67.752307)">11449</text>
+   </g>
+   <g id="text_8">
+    <text style="font: 7.5px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="347.820974" y="67.752307" transform="rotate(-0 347.820974 67.752307)">319</text>
+   </g>
+   <g id="text_9">
+    <text style="font: 7.5px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="142.263401" y="173.731208" transform="rotate(-0 142.263401 173.731208)">615</text>
+   </g>
+   <g id="text_10">
+    <text style="font: 7.5px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="347.820974" y="173.731208" transform="rotate(-0 347.820974 173.731208)">3217</text>
+   </g>
+   <g id="text_11">
+    <text style="font: 8px 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start" x="39.484615" y="8.82399" transform="rotate(-0 39.484615 8.82399)">Process q1 — filter confusion matrix</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p61fa7cbbbe">
+   <rect x="39.484615" y="12.82399" width="411.115145" height="211.957801"/>
+  </clipPath>
+ </defs>
+</svg>
