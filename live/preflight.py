@@ -76,6 +76,8 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
 def main() -> None:
     parser = argparse.ArgumentParser(description="Read-only Alpaca paper-execution readiness check")
     parser.add_argument("--symbol", required=True)
+    parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
+                        help="Alpaca market-data feed; SIP requires the appropriate entitlement")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--history-bars", type=int, default=100)
     parser.add_argument("--max-training-gap-hours", type=float,
@@ -87,6 +89,7 @@ def main() -> None:
     gap_seconds = None if args.max_training_gap_hours is None else args.max_training_gap_hours * 3_600
     bar_gap_seconds = None if args.max_bar_gap_minutes is None else args.max_bar_gap_minutes * 60
     report = run_preflight(args.symbol, model_path, args.history_bars,
+                           data_client=AlpacaMarketDataClient(feed=args.feed),
                            max_training_gap_seconds=gap_seconds, max_bar_gap_seconds=bar_gap_seconds)
     print(json.dumps(report, sort_keys=True))
     if not report["ready_for_paper_evaluation"]:

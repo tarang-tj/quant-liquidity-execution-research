@@ -56,6 +56,9 @@ when that budget is exhausted; order submission has no automatic retry path.
 
 1. Create separate Alpaca market-data and paper-trading credentials. Put them
    in your shell environment (never commit them); see [`.env.example`](.env.example).
+   Commands default to the IEX feed. Where your account is entitled to
+   consolidated SIP data, pass `--feed sip` consistently to training,
+   walk-forward evaluation, preflight, monitoring, and paper evaluation.
 2. Train using historical bars. The command below fetches bars only when data
    credentials are present; `--input` supports an offline CSV with
    `timestamp,open,high,low,close,volume` for reproducible tests. A bundled

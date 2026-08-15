@@ -355,6 +355,11 @@ class LiveBridgeTest(unittest.TestCase):
         self.assertEqual(quote.symbol, "SPY")
         self.assertAlmostEqual(quote.spread_bps, 2.0, places=3)
 
+    def test_market_data_feed_is_explicitly_limited_to_supported_alpaca_feeds(self) -> None:
+        with self.assertRaises(ValueError):
+            AlpacaMarketDataClient(key="data-key", secret="data-secret", feed="unknown")
+        self.assertEqual(AlpacaMarketDataClient(key="data-key", secret="data-secret", feed="sip").feed, "sip")
+
     def test_market_data_retries_transient_transport_failure_with_bound(self) -> None:
         client = AlpacaMarketDataClient(key="data-key", secret="data-secret", max_retries=1,
                                         retry_backoff_seconds=0)

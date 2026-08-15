@@ -29,13 +29,15 @@ def read_csv(path: Path, symbol: str) -> list[Bar]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", required=True)
+    parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
+                        help="Alpaca market-data feed; SIP requires the appropriate entitlement")
     parser.add_argument("--input", type=Path, help="CSV with timestamp,open,high,low,close,volume")
     parser.add_argument("--bars", type=int, default=1_000)
     parser.add_argument("--timeframe", default="1Min", help="timeframe represented by the training CSV/bars")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     bars = (read_csv(args.input, args.symbol) if args.input
-            else AlpacaMarketDataClient().bars(args.symbol, limit=args.bars, timeframe=args.timeframe))
+            else AlpacaMarketDataClient(feed=args.feed).bars(args.symbol, limit=args.bars, timeframe=args.timeframe))
     model = train_direction_model(bars, timeframe=args.timeframe)
     output = args.output or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"
     model.to_json(output)

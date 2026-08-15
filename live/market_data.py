@@ -145,6 +145,8 @@ class AlpacaMarketDataClient:
         self.feed = feed
         if not self.key or not self.secret:
             raise MarketDataError("set ALPACA_DATA_KEY and ALPACA_DATA_SECRET; never put credentials in source files")
+        if feed not in {"iex", "sip"}:
+            raise ValueError("feed must be either 'iex' or 'sip'")
         if not isinstance(max_retries, int) or isinstance(max_retries, bool) or not 0 <= max_retries <= 5:
             raise ValueError("max_retries must be an integer between 0 and 5")
         if (isinstance(retry_backoff_seconds, bool) or not isinstance(retry_backoff_seconds, (int, float))

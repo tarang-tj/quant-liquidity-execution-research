@@ -121,6 +121,7 @@ def run_monitor(
     now_fn: Callable[[], datetime] | None = None,
     max_training_gap_seconds: float | None = None,
     max_bar_gap_seconds: float | None = None,
+    feed: str = "iex",
 ) -> list[dict[str, object]]:
     """Run a finite paper monitor; unbounded daemon operation is not supported."""
     if not isinstance(iterations, int) or isinstance(iterations, bool) or not 1 <= iterations <= 10_000:
@@ -129,7 +130,7 @@ def run_monitor(
         raise ValueError("interval_seconds must be between 0 and 86,400")
     if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
         raise ValueError("quantity must be a positive whole number")
-    client = data_client or AlpacaMarketDataClient()
+    client = data_client or AlpacaMarketDataClient(feed=feed)
     paper_broker = broker or AlpacaPaperBroker()
     log = decision_log or PaperDecisionLog(ROOT / "runtime" / "paper_monitor_decisions.jsonl")
     # Pair the bytes used to load the model with the hash that will be
@@ -166,6 +167,8 @@ def run_monitor(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Finite read-only Alpaca paper-market monitor")
     parser.add_argument("--symbol", required=True)
+    parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
+                        help="Alpaca market-data feed; SIP requires the appropriate entitlement")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--iterations", type=int, default=1,
                         help="finite number of snapshots; defaults to one")
@@ -191,6 +194,7 @@ def main() -> None:
                                   else args.max_training_gap_hours * 3_600),
         max_bar_gap_seconds=(None if args.max_bar_gap_minutes is None
                              else args.max_bar_gap_minutes * 60),
+        feed=args.feed,
     )
     for sample in samples:
         print(json.dumps(sample, sort_keys=True))

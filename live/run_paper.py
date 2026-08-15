@@ -84,6 +84,8 @@ def submit_and_record(broker: AlpacaPaperBroker, intent: OrderIntent, decision: 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", required=True)
+    parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
+                        help="Alpaca market-data feed; SIP requires the appropriate entitlement")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--history-bars", type=int, default=100)
     parser.add_argument("--max-training-gap-hours", type=float,
@@ -93,7 +95,7 @@ def main() -> None:
     parser.add_argument("--quantity", type=int, default=1)
     parser.add_argument("--submit-paper-order", action="store_true", help="explicitly submit a qualifying paper order")
     args = parser.parse_args()
-    client = AlpacaMarketDataClient()
+    client = AlpacaMarketDataClient(feed=args.feed)
     quote = client.latest_quote(args.symbol)
     JsonlEventStore(ROOT / "runtime" / "quotes.jsonl").append_quotes([quote])
     model_path = args.model or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"

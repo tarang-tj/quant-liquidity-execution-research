@@ -81,6 +81,8 @@ def promote_if_qualified(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Gate and promote a paper-only predictive model")
     parser.add_argument("--symbol", required=True)
+    parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
+                        help="Alpaca market-data feed; SIP requires the appropriate entitlement")
     parser.add_argument("--input", type=Path, help="CSV with timestamp,open,high,low,close,volume")
     parser.add_argument("--bars", type=int, default=1_000)
     parser.add_argument("--training-bars", type=int, default=120)
@@ -93,7 +95,7 @@ def main() -> None:
     parser.add_argument("--target", type=Path)
     args = parser.parse_args()
     bars: list[Bar] = (read_csv(args.input, args.symbol) if args.input
-                       else AlpacaMarketDataClient().bars(args.symbol, limit=args.bars, timeframe=args.timeframe))
+                       else AlpacaMarketDataClient(feed=args.feed).bars(args.symbol, limit=args.bars, timeframe=args.timeframe))
     target = args.target or Path(__file__).resolve().parents[1] / "models" / f"{args.symbol.upper()}_logistic.json"
     report = promote_if_qualified(
         bars, symbol=args.symbol, target_path=target, timeframe=args.timeframe,
