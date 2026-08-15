@@ -30,6 +30,7 @@ from live.preflight import run_preflight
 from live.health import run_health
 from live.paper_monitor import run_monitor
 from live.promote_model import promote_if_qualified
+from live.retrain_model import run_retraining
 from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record, validate_quality_report
@@ -244,6 +245,28 @@ class LiveBridgeTest(unittest.TestCase):
             self.assertFalse(report["promoted"])
             self.assertEqual(target.read_bytes(), previous_bytes)
             self.assertIn("rejection_reason", report)
+
+    def test_retraining_loop_is_bounded_and_auditable_without_submission(self) -> None:
+        data_client = unittest.mock.Mock()
+        data_client.bars.return_value = self.bars
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "active.json"
+            report_path = Path(directory) / "promotion.jsonl"
+            promoted = {"promoted": True, "symbol": "SPY", "checks": {"all": True}}
+            with patch("live.retrain_model.promote_if_qualified", return_value=promoted) as promote:
+                reports = run_retraining(
+                    "SPY", target, iterations=2, interval_seconds=0, bars=180,
+                    data_client=data_client, report_path=report_path,
+                    sleep_fn=lambda _: self.fail("bounded zero interval should not sleep"),
+                )
+            self.assertEqual(len(reports), 2)
+            self.assertEqual(promote.call_count, 2)
+            self.assertEqual(data_client.bars.call_count, 2)
+            self.assertTrue(all(report["paper_only"] for report in reports))
+            self.assertTrue(all(not report["order_submission_attempted"] for report in reports))
+            persisted = [json.loads(line) for line in report_path.read_text().splitlines()]
+            self.assertEqual([report["cycle"] for report in persisted], [0, 1])
+            self.assertEqual([report["schema"] for report in persisted], ["paper_model_promotion.v1"] * 2)
 
     def test_read_only_preflight_checks_data_model_and_paper_broker(self) -> None:
         model = train_direction_model(self.bars)
