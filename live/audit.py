@@ -56,6 +56,8 @@ class PaperDecision:
     submitted: bool
     paper_order_id: str | None
     completed_before: str
+    broker_pending_buy_quantity: float | None = None
+    broker_pending_sell_quantity: float | None = None
     event_kind: str = "decision"
     submission_error: str | None = None
     client_order_id: str | None = None
@@ -68,14 +70,17 @@ class PaperDecision:
     def create(cls, *, model_path: Path, symbol: str, quote: Quote, bars: list[Bar], features: list[float],
                probability: float, side: str, risk_approved: bool, risk_reason: str, risk_source: str,
                broker_position: float | None, broker_daily_pnl: float | None, submitted: bool = False,
-               paper_order_id: str | None = None, client_order_id: str | None = None) -> "PaperDecision":
+               paper_order_id: str | None = None, client_order_id: str | None = None,
+               broker_pending_buy_quantity: float | None = None,
+               broker_pending_sell_quantity: float | None = None) -> "PaperDecision":
         cutoff = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         if any(bar.timestamp >= cutoff for bar in bars):
             raise ValueError("decision evidence contains an incomplete or future minute bar")
         return cls(datetime.now(timezone.utc).isoformat(), str(model_path.resolve()), file_sha256(model_path),
                    symbol, quote_record(quote), [bar_record(bar) for bar in bars], features, probability, side,
                    risk_approved, risk_reason, risk_source, broker_position, broker_daily_pnl, submitted,
-                   paper_order_id, cutoff.isoformat(), client_order_id=client_order_id)
+                   paper_order_id, cutoff.isoformat(), broker_pending_buy_quantity, broker_pending_sell_quantity,
+                   client_order_id=client_order_id)
 
 
 class PaperDecisionLog:

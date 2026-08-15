@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,7 @@ from live.market_data import AlpacaMarketDataClient, JsonlEventStore
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker
 from live.predictor import LogisticDirectionModel, live_features
-from live.risk import OrderIntent, RiskLimits, validate_paper_order
+from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,31 +101,39 @@ def main() -> None:
     side = "buy" if probability >= .5 else "sell"
     intent = OrderIntent(args.symbol.upper(), side, args.quantity)
     broker = AlpacaPaperBroker() if args.submit_paper_order else None
-    if broker is None:
-        decision = validate_paper_order(intent, quote, 0, 0.0, RiskLimits())
-        risk_source = "preview only; no broker account read"
-        broker_position = broker_daily_pnl = None
-    else:
-        state = broker.risk_state(intent.symbol)
-        decision = validate_paper_order(intent, quote, state.current_position, state.daily_pnl, RiskLimits())
-        risk_source = "Alpaca paper account and position"
-        broker_position, broker_daily_pnl = state.current_position, state.daily_pnl
-    report = {"symbol": quote.symbol, "mid_price": quote.mid_price, "spread_bps": quote.spread_bps,
-              "probability_next_bar_up": probability, "proposed_side": side, "risk": decision.reason,
-              "risk_source": risk_source, "submitted": False, "environment": "paper-only"}
-    audit = PaperDecision.create(model_path=model_path, symbol=quote.symbol, quote=quote, bars=bars,
-                                 features=features.tolist(), probability=probability, side=side,
-                                 risk_approved=decision.approved, risk_reason=decision.reason,
-                                 risk_source=risk_source, broker_position=broker_position,
-                                 broker_daily_pnl=broker_daily_pnl,
-                                 client_order_id=f"research-{uuid4().hex}")
-    decision_log = PaperDecisionLog(ROOT / "runtime" / "paper_decisions.jsonl")
-    audit = decision_log.append(audit)  # Must succeed before any possible network submission.
-    if args.submit_paper_order and decision.approved:
-        assert broker is not None
-        order = submit_and_record(broker, intent, audit, decision_log)
-        report["submitted"] = True
-        report["paper_order_id"] = order.get("id")
+    lease = PaperSubmissionLease(ROOT / "runtime" / "paper_submission.lock") if broker else nullcontext()
+    with lease:
+        if broker is None:
+            decision = validate_paper_order(intent, quote, 0, 0.0, RiskLimits())
+            risk_source = "preview only; no broker account read"
+            broker_position = broker_daily_pnl = broker_pending_buy_quantity = broker_pending_sell_quantity = None
+        else:
+            state = broker.risk_state(intent.symbol)
+            decision = validate_paper_order(intent, quote, state.current_position, state.daily_pnl, RiskLimits(),
+                                            pending_buy_quantity=state.pending_buy_quantity,
+                                            pending_sell_quantity=state.pending_sell_quantity)
+            risk_source = "Alpaca paper account, position, and open orders"
+            broker_position, broker_daily_pnl = state.current_position, state.daily_pnl
+            broker_pending_buy_quantity, broker_pending_sell_quantity = (
+                state.pending_buy_quantity, state.pending_sell_quantity)
+        report = {"symbol": quote.symbol, "mid_price": quote.mid_price, "spread_bps": quote.spread_bps,
+                  "probability_next_bar_up": probability, "proposed_side": side, "risk": decision.reason,
+                  "risk_source": risk_source, "submitted": False, "environment": "paper-only"}
+        audit = PaperDecision.create(model_path=model_path, symbol=quote.symbol, quote=quote, bars=bars,
+                                     features=features.tolist(), probability=probability, side=side,
+                                     risk_approved=decision.approved, risk_reason=decision.reason,
+                                     risk_source=risk_source, broker_position=broker_position,
+                                     broker_daily_pnl=broker_daily_pnl,
+                                     broker_pending_buy_quantity=broker_pending_buy_quantity,
+                                     broker_pending_sell_quantity=broker_pending_sell_quantity,
+                                     client_order_id=f"research-{uuid4().hex}")
+        decision_log = PaperDecisionLog(ROOT / "runtime" / "paper_decisions.jsonl")
+        audit = decision_log.append(audit)  # Must succeed before any possible network submission.
+        if args.submit_paper_order and decision.approved:
+            assert broker is not None
+            order = submit_and_record(broker, intent, audit, decision_log)
+            report["submitted"] = True
+            report["paper_order_id"] = order.get("id")
     print(report)
 
 

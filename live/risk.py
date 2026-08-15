@@ -32,20 +32,54 @@ class RiskDecision:
     reason: str
 
 
+class PaperSubmissionLease:
+    """Non-blocking local process lease around a paper risk check and submission.
+
+    Broker open-order reservations protect against external order flow; this
+    lease closes the remaining same-host time-of-check/time-of-submit window.
+    """
+
+    def __init__(self, path: "Path") -> None:
+        self.path = path
+        self._handle: object | None = None
+
+    def __enter__(self) -> "PaperSubmissionLease":
+        import fcntl
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self.path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            handle.close()
+            raise RuntimeError("another local paper-submission process holds the risk lease") from exc
+        self._handle = handle
+        return self
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
+        import fcntl
+        assert self._handle is not None
+        handle = self._handle
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()  # type: ignore[union-attr]
+        self._handle = None
+
+
 def validate_paper_order(intent: OrderIntent, quote: Quote, current_position: float, daily_pnl: float,
-                         limits: RiskLimits = RiskLimits(), now: datetime | None = None) -> RiskDecision:
+                         limits: RiskLimits = RiskLimits(), now: datetime | None = None,
+                         pending_buy_quantity: float = 0.0, pending_sell_quantity: float = 0.0) -> RiskDecision:
     """Check fresh price, exposure, liquidity, loss, and emergency stop before any paper submission."""
     now = now or datetime.now(timezone.utc)
     if os.environ.get("TRADING_KILL_SWITCH", "0") == "1":
         return RiskDecision(False, "TRADING_KILL_SWITCH is enabled")
     if not isinstance(intent.quantity, int) or isinstance(intent.quantity, bool) or intent.quantity <= 0:
         return RiskDecision(False, "quantity must be a positive whole number")
-    if not all(isfinite(value) for value in (daily_pnl, current_position, limits.max_position_shares,
+    if not all(isfinite(value) for value in (daily_pnl, current_position, pending_buy_quantity, pending_sell_quantity,
+            limits.max_position_shares,
             limits.max_daily_loss, limits.max_order_notional, limits.max_spread_bps, limits.max_quote_age_seconds)):
         return RiskDecision(False, "risk input or limit is non-finite")
-    if min(limits.max_position_shares, limits.max_order_notional, limits.max_spread_bps,
+    if min(pending_buy_quantity, pending_sell_quantity, limits.max_position_shares, limits.max_order_notional, limits.max_spread_bps,
            limits.max_quote_age_seconds, limits.max_daily_loss) < 0:
-        return RiskDecision(False, "risk limits cannot be negative")
+        return RiskDecision(False, "pending quantities or risk limits cannot be negative")
     if quote.timestamp > now:
         return RiskDecision(False, "quote timestamp is in the future")
     if intent.side not in {"buy", "sell"}:
@@ -57,8 +91,11 @@ def validate_paper_order(intent: OrderIntent, quote: Quote, current_position: fl
     if daily_pnl <= -abs(limits.max_daily_loss):
         return RiskDecision(False, "daily loss limit reached")
     signed_quantity = intent.quantity if intent.side == "buy" else -intent.quantity
-    if abs(current_position + signed_quantity) > limits.max_position_shares:
-        return RiskDecision(False, "position limit exceeded")
+    position_after_new_order = current_position + signed_quantity
+    worst_reserved_position = max(abs(position_after_new_order + pending_buy_quantity),
+                                  abs(position_after_new_order - pending_sell_quantity))
+    if worst_reserved_position > limits.max_position_shares:
+        return RiskDecision(False, "position limit exceeded including open-order reservations")
     if intent.quantity * quote.mid_price > limits.max_order_notional:
         return RiskDecision(False, "order notional limit exceeded")
     return RiskDecision(True, "paper order passed all risk gates")

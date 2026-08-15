@@ -36,10 +36,14 @@ direction baseline trained on a chronological split; append-only local quote
 logging; and fail-closed risk gates. It **cannot submit a live order**: the
 only broker adapter hard-codes Alpaca's paper-trading endpoint, and even a
 paper order requires `--submit-paper-order` plus fresh quote, spread, position,
-notional, daily-loss, and kill-switch checks. At submission time, position and
-daily P&L are read from the fixed Alpaca paper account; unavailable broker state
-fails closed rather than trusting command-line inputs. Live predictions use
-only completed minute bars, never the in-progress bar.
+open-order reservations, notional, daily-loss, and kill-switch checks. At
+submission time, daily P&L, and full quantity of open orders are read from the
+fixed Alpaca paper account before position, so a fill between reads is
+over-reserved rather than undercounted; unavailable or malformed broker state
+fails closed rather than trusting command-line inputs. A non-blocking local
+process lease covers the check-to-submit window. This bridge is deliberately a
+single-host paper runner, not a multi-host/HA execution service. Live
+predictions use only completed minute bars, never the in-progress bar.
 
 1. Create separate Alpaca market-data and paper-trading credentials. Put them
    in your shell environment (never commit them); see [`.env.example`](.env.example).

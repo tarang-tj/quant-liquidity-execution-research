@@ -22,7 +22,7 @@ from live.predictor import LogisticDirectionModel, causal_training_matrix, live_
 from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record
-from live.risk import OrderIntent, RiskLimits, validate_paper_order
+from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
 
 
 def append_in_child(log_path: str, decision: PaperDecision, start: object) -> None:
@@ -40,6 +40,12 @@ def reconcile_in_child(log_path: str, client_order_id: str, start: object, outco
         outcomes.put(False)
     else:
         outcomes.put(True)
+
+
+def hold_submission_lease(lock_path: str, acquired: object, release: object) -> None:
+    with PaperSubmissionLease(Path(lock_path)):
+        acquired.set()
+        release.wait(timeout=10)
 
 
 class LiveBridgeTest(unittest.TestCase):
@@ -88,6 +94,12 @@ class LiveBridgeTest(unittest.TestCase):
                                               RiskLimits(), self.now).approved)
         self.assertFalse(validate_paper_order(OrderIntent("SPY", "buy", 1), self.quote, 0, 0,
                                               RiskLimits(max_position_shares=float("nan")), self.now).approved)
+        self.assertFalse(validate_paper_order(OrderIntent("SPY", "buy", 1), self.quote, 0, 0,
+                                              RiskLimits(max_position_shares=10), self.now,
+                                              pending_buy_quantity=10).approved)
+        self.assertFalse(validate_paper_order(OrderIntent("SPY", "sell", 1), self.quote, 0, 0,
+                                              RiskLimits(max_position_shares=10), self.now,
+                                              pending_sell_quantity=10).approved)
         old = os.environ.get("TRADING_KILL_SWITCH")
         try:
             os.environ["TRADING_KILL_SWITCH"] = "1"
@@ -141,9 +153,30 @@ class LiveBridgeTest(unittest.TestCase):
 
     def test_paper_risk_state_is_broker_sourced_and_fails_closed(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
-        with patch.object(broker, "_get_json", side_effect=[{"equity": "1000", "last_equity": "1025"}, {"qty": "3"}]):
-            self.assertEqual(broker.risk_state("SPY"), PaperRiskState(3, -25.0))
+        with patch.object(broker, "_get_json", side_effect=[
+            {"equity": "1000", "last_equity": "1025"},
+            [{"symbol": "SPY", "side": "buy", "qty": "4", "filled_qty": "1"}], {"qty": "3"},
+        ]):
+            self.assertEqual(broker.risk_state("SPY"), PaperRiskState(3, -25.0, 4, 0))
         with patch.object(broker, "_get_json", side_effect=MarketDataError("unavailable")):
+            with self.assertRaises(MarketDataError):
+                broker.risk_state("SPY")
+
+    def test_invalid_open_order_fails_closed(self) -> None:
+        broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
+        with patch.object(broker, "_get_json", side_effect=[
+            {"equity": "1000", "last_equity": "1025"},
+            [{"symbol": "SPY", "side": "buy", "qty": "1", "filled_qty": "2"}], {"qty": "3"},
+        ]):
+            with self.assertRaises(MarketDataError):
+                broker.risk_state("SPY")
+
+    def test_open_order_query_limit_fails_closed(self) -> None:
+        broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
+        orders = [{"symbol": "SPY", "side": "buy", "qty": "1", "filled_qty": "0"}] * 500
+        with patch.object(broker, "_get_json", side_effect=[
+            {"equity": "1000", "last_equity": "1025"}, orders, {"qty": "3"},
+        ]):
             with self.assertRaises(MarketDataError):
                 broker.risk_state("SPY")
 
@@ -354,6 +387,21 @@ class LiveBridgeTest(unittest.TestCase):
                 worker.join(timeout=10)
                 self.assertEqual(worker.exitcode, 0)
             self.assertEqual(len(PaperDecisionLog(log_path).read()), 2)
+
+    def test_submission_lease_excludes_another_process(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            context = multiprocessing.get_context("spawn")
+            acquired, release = context.Event(), context.Event()
+            worker = context.Process(target=hold_submission_lease,
+                                     args=(str(Path(directory) / "submission.lock"), acquired, release))
+            worker.start()
+            self.assertTrue(acquired.wait(timeout=10))
+            with self.assertRaises(RuntimeError):
+                with PaperSubmissionLease(Path(directory) / "submission.lock"):
+                    pass
+            release.set()
+            worker.join(timeout=10)
+            self.assertEqual(worker.exitcode, 0)
 
 
 if __name__ == "__main__":
