@@ -67,7 +67,7 @@ class PaperSubmissionLease:
 def validate_paper_order(intent: OrderIntent, quote: Quote, current_position: float, daily_pnl: float,
                          limits: RiskLimits = RiskLimits(), now: datetime | None = None,
                          pending_buy_quantity: float = 0.0, pending_sell_quantity: float = 0.0,
-                         market_open: bool = True) -> RiskDecision:
+                         market_open: bool = True, buying_power: float | None = None) -> RiskDecision:
     """Check fresh price, exposure, liquidity, loss, and emergency stop before any paper submission."""
     now = now or datetime.now(timezone.utc)
     if os.environ.get("TRADING_KILL_SWITCH", "0") == "1":
@@ -82,6 +82,8 @@ def validate_paper_order(intent: OrderIntent, quote: Quote, current_position: fl
             limits.max_position_shares,
             limits.max_daily_loss, limits.max_order_notional, limits.max_spread_bps, limits.max_quote_age_seconds)):
         return RiskDecision(False, "risk input or limit is non-finite")
+    if buying_power is not None and (not isfinite(buying_power) or buying_power < 0):
+        return RiskDecision(False, "buying power is invalid")
     if min(pending_buy_quantity, pending_sell_quantity, limits.max_position_shares, limits.max_order_notional, limits.max_spread_bps,
            limits.max_quote_age_seconds, limits.max_daily_loss) < 0:
         return RiskDecision(False, "pending quantities or risk limits cannot be negative")
@@ -103,4 +105,6 @@ def validate_paper_order(intent: OrderIntent, quote: Quote, current_position: fl
         return RiskDecision(False, "position limit exceeded including open-order reservations")
     if intent.quantity * quote.mid_price > limits.max_order_notional:
         return RiskDecision(False, "order notional limit exceeded")
+    if buying_power is not None and intent.quantity * quote.mid_price > buying_power:
+        return RiskDecision(False, "order exceeds broker buying power")
     return RiskDecision(True, "paper order passed all risk gates")

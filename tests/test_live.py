@@ -145,7 +145,7 @@ class LiveBridgeTest(unittest.TestCase):
             data_client.latest_quote.return_value = self.quote
             data_client.bars.return_value = self.bars[-100:]
             broker = unittest.mock.Mock()
-            broker.risk_state.return_value = PaperRiskState(1, -2, 3, 4)
+            broker.risk_state.return_value = PaperRiskState(1, -2, 3, 4, 1000)
             broker.market_clock.return_value = True
             report = run_preflight("SPY", model_path, data_client=data_client, broker=broker)
         self.assertTrue(report["ready_for_paper_evaluation"])
@@ -361,6 +361,16 @@ class LiveBridgeTest(unittest.TestCase):
         self.assertFalse(invalid.approved)
         self.assertEqual(invalid.reason, "market session state is invalid")
 
+    def test_risk_gate_enforces_broker_buying_power(self) -> None:
+        rejected = validate_paper_order(OrderIntent("SPY", "buy", 2), self.quote, 0, 0,
+                                        RiskLimits(), self.now, buying_power=1.0)
+        self.assertFalse(rejected.approved)
+        self.assertEqual(rejected.reason, "order exceeds broker buying power")
+        invalid = validate_paper_order(OrderIntent("SPY", "buy", 1), self.quote, 0, 0,
+                                       RiskLimits(), self.now, buying_power=float("nan"))
+        self.assertFalse(invalid.approved)
+        self.assertEqual(invalid.reason, "buying power is invalid")
+
     def test_quote_schema_normalizes_provider_fields(self) -> None:
         quote = Quote.from_alpaca({"S": "SPY", "bp": 100.0, "ap": 100.02, "bs": 10, "as": 12,
                                    "t": "2026-01-02T14:30:00Z"})
@@ -508,10 +518,10 @@ class LiveBridgeTest(unittest.TestCase):
     def test_paper_risk_state_is_broker_sourced_and_fails_closed(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
         with patch.object(broker, "_get_json", side_effect=[
-            {"equity": "1000", "last_equity": "1025"},
+            {"equity": "1000", "last_equity": "1025", "buying_power": "900"},
             [{"symbol": "SPY", "side": "buy", "qty": "4", "filled_qty": "1"}], {"qty": "3"},
         ]):
-            self.assertEqual(broker.risk_state("SPY"), PaperRiskState(3, -25.0, 4, 0))
+            self.assertEqual(broker.risk_state("SPY"), PaperRiskState(3, -25.0, 4, 0, 900))
         with patch.object(broker, "_get_json", side_effect=MarketDataError("unavailable")):
             with self.assertRaises(MarketDataError):
                 broker.risk_state("SPY")
@@ -519,7 +529,7 @@ class LiveBridgeTest(unittest.TestCase):
     def test_invalid_open_order_fails_closed(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
         with patch.object(broker, "_get_json", side_effect=[
-            {"equity": "1000", "last_equity": "1025"},
+            {"equity": "1000", "last_equity": "1025", "buying_power": "900"},
             [{"symbol": "SPY", "side": "buy", "qty": "1", "filled_qty": "2"}], {"qty": "3"},
         ]):
             with self.assertRaises(MarketDataError):
@@ -529,7 +539,7 @@ class LiveBridgeTest(unittest.TestCase):
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
         orders = [{"symbol": "SPY", "side": "buy", "qty": "1", "filled_qty": "0"}] * 500
         with patch.object(broker, "_get_json", side_effect=[
-            {"equity": "1000", "last_equity": "1025"}, orders, {"qty": "3"},
+            {"equity": "1000", "last_equity": "1025", "buying_power": "900"}, orders, {"qty": "3"},
         ]):
             with self.assertRaises(MarketDataError):
                 broker.risk_state("SPY")

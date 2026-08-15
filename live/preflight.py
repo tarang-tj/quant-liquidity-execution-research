@@ -65,7 +65,7 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
         checks.append(_result("paper_broker", True,
                               "paper account, position, and open-order reservation snapshot received "
                               f"(position={state.current_position}, pending_buy={state.pending_buy_quantity}, "
-                              f"pending_sell={state.pending_sell_quantity})"))
+                              f"pending_sell={state.pending_sell_quantity}, buying_power={state.buying_power})"))
         market_open = paper_broker.market_clock()
         checks.append(_result("market_clock", True,
                               "paper market is open" if market_open else

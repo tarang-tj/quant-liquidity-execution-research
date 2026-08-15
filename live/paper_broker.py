@@ -48,10 +48,11 @@ class AlpacaPaperBroker:
             raise MarketDataError("paper account response must be an object")
         try:
             daily_pnl = float(account["equity"]) - float(account["last_equity"])
-            if not isfinite(daily_pnl):
-                raise ValueError("non-finite daily P&L")
+            buying_power = float(account["buying_power"])
+            if not isfinite(daily_pnl) or not isfinite(buying_power) or buying_power < 0:
+                raise ValueError("non-finite daily P&L or buying power")
         except (KeyError, TypeError, ValueError) as exc:
-            raise MarketDataError("paper account lacks finite equity and last_equity") from exc
+            raise MarketDataError("paper account lacks finite equity, last_equity, and buying_power") from exc
         # Read and conservatively reserve open orders *before* position.  If an
         # order fills between these calls, it is either represented in the later
         # position or still reserved at its full original quantity (often both),
@@ -97,7 +98,8 @@ class AlpacaPaperBroker:
                 raise
         return PaperRiskState(current_position=current_position, daily_pnl=daily_pnl,
                               pending_buy_quantity=pending_buy_quantity,
-                              pending_sell_quantity=pending_sell_quantity)
+                              pending_sell_quantity=pending_sell_quantity,
+                              buying_power=buying_power)
 
     def market_clock(self) -> bool:
         """Return the broker's current session state; malformed data fails closed."""
@@ -144,3 +146,4 @@ class PaperRiskState:
     daily_pnl: float
     pending_buy_quantity: float = 0.0
     pending_sell_quantity: float = 0.0
+    buying_power: float | None = None

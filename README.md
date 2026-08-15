@@ -102,7 +102,7 @@ session state; order submission has no automatic retry path.
    ```
 
    Before the first evaluation, run the read-only readiness preflight. It reads
-   the model, live data, paper account/risk snapshot, and broker market clock
+   the model, live data, paper account/risk/buying-power snapshot, and broker market clock
    but never creates an order:
 
    ```bash

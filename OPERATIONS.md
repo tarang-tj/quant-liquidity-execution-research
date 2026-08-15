@@ -33,8 +33,8 @@ python live/preflight.py --symbol SPY --max-training-gap-hours 168 \
   --max-bar-gap-minutes 3
 ```
 
-Preflight reads the model, completed bars, quote, account/position/open-order
-state, and broker market clock. It never creates an order. A closed market is
+Preflight reads the model, completed bars, quote, account/position/open-order/
+buying-power state, and broker market clock. It never creates an order. A closed market is
 reported as a normal state; malformed or unavailable state fails the check.
 
 ## Stage 2: causal evaluation and promotion
