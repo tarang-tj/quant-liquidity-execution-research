@@ -87,7 +87,7 @@ future relative to the live bars.
    submit anything by default:
 
    ```bash
-   python live/run_paper.py --symbol SPY
+   python live/run_paper.py --symbol SPY --max-training-gap-hours 168
    ```
 
    Before the first evaluation, run the read-only readiness preflight. It reads
@@ -95,7 +95,7 @@ future relative to the live bars.
    order:
 
    ```bash
-   python live/preflight.py --symbol SPY
+   python live/preflight.py --symbol SPY --max-training-gap-hours 168
    ```
 
    For a finite staged paper observation window, use the read-only monitor. It
@@ -103,8 +103,13 @@ future relative to the live bars.
    appends each prediction to a durable journal, and never submits an order:
 
    ```bash
-   python live/paper_monitor.py --symbol SPY --iterations 30 --interval-seconds 60
+   python live/paper_monitor.py --symbol SPY --iterations 30 --interval-seconds 60 \
+     --max-training-gap-hours 168
    ```
+
+   The optional freshness SLA makes each path fail closed when the latest
+   completed live bar is more than the specified number of hours after the
+   model's recorded training end; omit it when replaying historical fixtures.
 
 4. Only after reviewing the logs and model report may you explicitly add
    `--submit-paper-order`. This remains simulation, not production approval.

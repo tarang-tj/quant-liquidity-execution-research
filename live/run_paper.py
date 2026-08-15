@@ -86,6 +86,8 @@ def main() -> None:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--model", type=Path)
     parser.add_argument("--history-bars", type=int, default=100)
+    parser.add_argument("--max-training-gap-hours", type=float,
+                        help="optional model freshness SLA; fail closed when exceeded")
     parser.add_argument("--quantity", type=int, default=1)
     parser.add_argument("--submit-paper-order", action="store_true", help="explicitly submit a qualifying paper order")
     args = parser.parse_args()
@@ -96,7 +98,8 @@ def main() -> None:
     model = LogisticDirectionModel.from_json(model_path)
     validate_paper_model(model, args.symbol)
     bars = client.bars(args.symbol, args.history_bars)
-    validate_model_data_alignment(model, bars)
+    gap_seconds = None if args.max_training_gap_hours is None else args.max_training_gap_hours * 3_600
+    validate_model_data_alignment(model, bars, gap_seconds)
     features = live_features(bars)
     probability = model.predict_probability(features)
     side = "buy" if probability >= .5 else "sell"

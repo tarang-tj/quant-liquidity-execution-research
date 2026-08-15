@@ -26,7 +26,8 @@ def _result(check: str, ok: bool, detail: str) -> dict[str, object]:
 
 def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
                   data_client: AlpacaMarketDataClient | None = None,
-                  broker: AlpacaPaperBroker | None = None) -> dict[str, object]:
+                  broker: AlpacaPaperBroker | None = None,
+                  max_training_gap_seconds: float | None = None) -> dict[str, object]:
     """Verify read-only prerequisites for paper execution without any order path."""
     checks: list[dict[str, object]] = []
     model: LogisticDirectionModel | None = None
@@ -48,7 +49,7 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
                                   f"quote and {len(bars)} completed one-minute bars received for {quote.symbol}"))
             if model is not None:
                 try:
-                    validate_model_data_alignment(model, bars)
+                    validate_model_data_alignment(model, bars, max_training_gap_seconds)
                     checks.append(_result("model_data_alignment", True,
                                           "model training window does not extend beyond live bars"))
                 except ValueError as exc:
@@ -76,9 +77,13 @@ def main() -> None:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--model", type=Path)
     parser.add_argument("--history-bars", type=int, default=100)
+    parser.add_argument("--max-training-gap-hours", type=float,
+                        help="optional model freshness SLA; fail closed when exceeded")
     args = parser.parse_args()
     model_path = args.model or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"
-    report = run_preflight(args.symbol, model_path, args.history_bars)
+    gap_seconds = None if args.max_training_gap_hours is None else args.max_training_gap_hours * 3_600
+    report = run_preflight(args.symbol, model_path, args.history_bars,
+                           max_training_gap_seconds=gap_seconds)
     print(json.dumps(report, sort_keys=True))
     if not report["ready_for_paper_evaluation"]:
         raise SystemExit(1)
