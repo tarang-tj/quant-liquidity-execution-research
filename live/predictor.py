@@ -28,6 +28,34 @@ class LogisticDirectionModel:
     intercept: float
     report: ModelReport
 
+    def __post_init__(self) -> None:
+        if type(self.intercept) not in (int, float):
+            raise ValueError("model intercept must be a numeric primitive")
+        if (type(self.report.train_observations) is not int or
+                type(self.report.validation_observations) is not int or
+                type(self.report.validation_accuracy) not in (int, float) or
+                type(self.report.validation_brier) not in (int, float) or
+                type(self.report.deployable_for_paper) is not bool):
+            raise ValueError("model report fields have invalid primitive types")
+        arrays = (self.feature_mean, self.feature_scale, self.weights)
+        if any(not isinstance(array, np.ndarray) or array.shape != (4,) for array in arrays):
+            raise ValueError("model parameters must be three four-element arrays")
+        if any(not np.isfinite(array).all() for array in arrays) or not np.isfinite(self.intercept):
+            raise ValueError("model parameters must be finite")
+        if np.any(self.feature_scale <= 0):
+            raise ValueError("model feature scales must be positive")
+        if (not isinstance(self.report.train_observations, int) or self.report.train_observations < 1 or
+                not isinstance(self.report.validation_observations, int) or self.report.validation_observations < 1):
+            raise ValueError("model observation counts must be positive integers")
+        if (not np.isfinite(self.report.validation_accuracy) or not 0 <= self.report.validation_accuracy <= 1 or
+                not np.isfinite(self.report.validation_brier) or not 0 <= self.report.validation_brier <= 1):
+            raise ValueError("model validation metrics must be finite probabilities")
+        if self.report.deployable_for_paper and (
+                self.report.validation_observations < 100 or
+                self.report.validation_accuracy < 0.52 or
+                self.report.validation_brier >= 0.25):
+            raise ValueError("deployable model does not satisfy the chronological paper gate")
+
     def predict_probability(self, features: np.ndarray) -> float:
         features = np.asarray(features, dtype=float)
         if features.shape != self.feature_mean.shape or not np.isfinite(features).all():
@@ -44,8 +72,26 @@ class LogisticDirectionModel:
     @classmethod
     def from_json(cls, path: Path) -> "LogisticDirectionModel":
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return cls(np.asarray(raw["feature_mean"], dtype=float), np.asarray(raw["feature_scale"], dtype=float),
-                   np.asarray(raw["weights"], dtype=float), float(raw["intercept"]), ModelReport(**raw["report"]))
+        if not isinstance(raw, dict):
+            raise ValueError("model payload must be an object")
+        arrays = [raw.get(name) for name in ("feature_mean", "feature_scale", "weights")]
+        if any(not isinstance(values, list) or any(type(value) not in (int, float) for value in values)
+               for values in arrays):
+            raise ValueError("model parameter arrays must contain only numeric primitives")
+        intercept = raw.get("intercept")
+        report = raw.get("report")
+        if type(intercept) not in (int, float) or not isinstance(report, dict):
+            raise ValueError("model intercept or report has an invalid type")
+        for name in ("train_observations", "validation_observations"):
+            if type(report.get(name)) is not int:
+                raise ValueError("model observation counts must be integers")
+        for name in ("validation_accuracy", "validation_brier"):
+            if type(report.get(name)) not in (int, float):
+                raise ValueError("model validation metrics must be numeric")
+        if type(report.get("deployable_for_paper")) is not bool:
+            raise ValueError("model deployment flag must be boolean")
+        return cls(np.asarray(arrays[0], dtype=float), np.asarray(arrays[1], dtype=float),
+                   np.asarray(arrays[2], dtype=float), intercept, ModelReport(**report))
 
 
 def causal_training_matrix(bars: list[Bar], lookback: int = 20) -> tuple[np.ndarray, np.ndarray]:

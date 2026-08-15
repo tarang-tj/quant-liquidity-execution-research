@@ -76,7 +76,7 @@ class LiveBridgeTest(unittest.TestCase):
 
     def test_read_only_preflight_checks_data_model_and_paper_broker(self) -> None:
         model = train_direction_model(self.bars)
-        deployable = replace(model, report=replace(model.report, deployable_for_paper=True))
+        deployable = replace(model, report=replace(model.report, validation_observations=100, deployable_for_paper=True))
         with tempfile.TemporaryDirectory() as directory:
             model_path = Path(directory) / "model.json"
             deployable.to_json(model_path)
@@ -96,7 +96,7 @@ class LiveBridgeTest(unittest.TestCase):
 
     def test_finite_read_only_monitor_records_each_sample_without_submission(self) -> None:
         model = train_direction_model(self.bars)
-        deployable = replace(model, report=replace(model.report, deployable_for_paper=True))
+        deployable = replace(model, report=replace(model.report, validation_observations=100, deployable_for_paper=True))
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             model_path, log_path = folder / "model.json", folder / "monitor.jsonl"
@@ -125,6 +125,32 @@ class LiveBridgeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_monitor("SPY", Path("missing-model.json"), iterations=1, interval_seconds=float("nan"),
                         data_client=unittest.mock.Mock(), broker=unittest.mock.Mock())
+
+    def test_model_deserialization_rejects_nonfinite_or_invalid_deployable_parameters(self) -> None:
+        model = train_direction_model(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            model.to_json(path)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw["feature_scale"][0] = 0
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                LogisticDirectionModel.from_json(path)
+            model.to_json(path)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw["report"]["validation_observations"] = 100
+            raw["report"]["deployable_for_paper"] = True
+            raw["report"]["validation_accuracy"] = 0.51
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                LogisticDirectionModel.from_json(path)
+            model.to_json(path)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw["intercept"] = True
+            raw["report"]["deployable_for_paper"] = 1
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                LogisticDirectionModel.from_json(path)
 
     def test_future_bar_does_not_change_earlier_features(self) -> None:
         baseline, _ = causal_training_matrix(self.bars)
