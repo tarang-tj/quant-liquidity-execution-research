@@ -203,6 +203,17 @@ def train_direction_model(bars: list[Bar], lookback: int = 20, validation_fracti
     """Chronological train/validation split with deterministic full-batch logistic fitting."""
     if not isinstance(timeframe, str) or not timeframe.strip():
         raise ValueError("timeframe must be a non-empty string")
+    if (isinstance(validation_fraction, bool) or not isinstance(validation_fraction, (int, float)) or
+            not np.isfinite(validation_fraction) or not 0 < validation_fraction < 1):
+        raise ValueError("validation_fraction must be strictly between 0 and 1")
+    if (isinstance(learning_rate, bool) or not isinstance(learning_rate, (int, float)) or
+            not np.isfinite(learning_rate) or learning_rate <= 0):
+        raise ValueError("learning_rate must be a finite positive number")
+    if not isinstance(iterations, int) or isinstance(iterations, bool) or iterations < 1:
+        raise ValueError("iterations must be a positive integer")
+    if (isinstance(l2, bool) or not isinstance(l2, (int, float)) or
+            not np.isfinite(l2) or l2 < 0):
+        raise ValueError("l2 must be a finite non-negative number")
     x, y = causal_training_matrix(bars, lookback)
     split = int(len(x) * (1 - validation_fraction))
     if split < 30 or len(x) - split < 20:

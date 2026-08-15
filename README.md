@@ -59,6 +59,14 @@ predictions use only completed minute bars, never the in-progress bar.
    python live/train_predictor.py --symbol SPY --input tests/fixtures/spy_bars.csv --output /tmp/spy_model.json
    ```
 
+   Before considering a model for paper use, run a causal walk-forward check.
+   Each block is fit only on bars strictly before that block; the result also
+   reports a majority-class baseline:
+
+   ```bash
+   python live/evaluate_walk_forward.py --symbol SPY --bars 1000 --training-bars 120 --evaluation-bars 120
+   ```
+
 3. Evaluate a fresh quote and print the paper-order recommendation. It does not
    submit anything by default:
 

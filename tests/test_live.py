@@ -27,6 +27,7 @@ from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record
 from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
+from live.walk_forward import walk_forward_evaluate
 
 
 def append_in_child(log_path: str, decision: PaperDecision, start: object) -> None:
@@ -227,6 +228,32 @@ class LiveBridgeTest(unittest.TestCase):
         legacy = replace(model, report=legacy_report)
         with self.assertRaises(ValueError):
             validate_paper_model(legacy, "SPY")
+
+    def test_walk_forward_evaluation_is_causal_and_against_baseline(self) -> None:
+        summary = walk_forward_evaluate(self.bars, training_bars=120, evaluation_bars=20, iterations=300)
+        self.assertEqual(summary.symbol, "SPY")
+        self.assertEqual(summary.predictions, len(self.bars) - 1 - 120)
+        self.assertEqual(summary.evaluation_block_size, 20)
+        self.assertEqual(summary.evaluation_predictions, summary.predictions)
+        self.assertGreaterEqual(summary.retrain_blocks, 1)
+        self.assertTrue(0 <= summary.accuracy <= 1)
+        self.assertTrue(0 <= summary.brier <= 1)
+        self.assertTrue(0.5 <= summary.majority_baseline_accuracy <= 1)
+        changed = self.bars.copy()
+        for index in range(121, len(changed)):
+            bar = changed[index]
+            changed[index] = Bar(bar.symbol, bar.timestamp, bar.open, bar.high * 10, bar.low,
+                                  bar.close * 10, bar.volume * 10)
+        baseline_model = train_direction_model(self.bars[:120], iterations=300)
+        changed_model = train_direction_model(changed[:120], iterations=300)
+        np.testing.assert_allclose(live_features(self.bars[:121]), live_features(changed[:121]), atol=0, rtol=0)
+        self.assertAlmostEqual(
+            baseline_model.predict_probability(live_features(self.bars[:121])),
+            changed_model.predict_probability(live_features(changed[:121])), places=12)
+        for kwargs in ({"validation_fraction": 0}, {"learning_rate": float("nan")},
+                       {"iterations": 0}, {"l2": -1}, {"lookback": "20"}):
+            with self.assertRaises(ValueError):
+                walk_forward_evaluate(self.bars, training_bars=120, evaluation_bars=20, **kwargs)
 
     def test_risk_gates_are_fail_closed(self) -> None:
         allowed = validate_paper_order(OrderIntent("SPY", "buy", 2), self.quote, 0, 0, RiskLimits(), self.now)
