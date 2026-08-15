@@ -95,6 +95,7 @@ def run_retraining(
             minimum_accuracy=minimum_accuracy,
             maximum_brier=maximum_brier,
             minimum_net_return_bps=minimum_net_return_bps,
+            feed=feed,
         )
         report = {
             **report,

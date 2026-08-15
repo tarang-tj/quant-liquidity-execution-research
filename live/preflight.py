@@ -36,7 +36,7 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
     model: LogisticDirectionModel | None = None
     try:
         model = LogisticDirectionModel.from_json(model_path)
-        validate_paper_model(model, symbol)
+        validate_paper_model(model, symbol, feed=feed)
         checks.append(_result("model", True, "chronological validation and provenance gate passed"))
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         checks.append(_result("model", False, f"model unavailable or invalid: {type(exc).__name__}"))

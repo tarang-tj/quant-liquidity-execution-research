@@ -32,6 +32,7 @@ def promote_if_qualified(
     minimum_accuracy: float = 0.52,
     maximum_brier: float = 0.25,
     minimum_net_return_bps: float = 0.0,
+    feed: str | None = None,
 ) -> dict[str, Any]:
     """Train a candidate, gate it, and replace ``target_path`` only on success.
 
@@ -51,7 +52,7 @@ def promote_if_qualified(
         bars, training_bars=training_bars, evaluation_bars=evaluation_bars,
         timeframe=timeframe, transaction_cost_bps=transaction_cost_bps,
     )
-    candidate = train_direction_model(bars, timeframe=timeframe)
+    candidate = train_direction_model(bars, timeframe=timeframe, feed=feed)
     checks = {
         "model_validation_gate": bool(candidate.report.deployable_for_paper),
         "walk_forward_accuracy": walk.accuracy >= minimum_accuracy,
@@ -61,6 +62,7 @@ def promote_if_qualified(
     report: dict[str, Any] = {
         "symbol": symbol.upper(),
         "timeframe": timeframe,
+        "feed": feed,
         "target_path": str(target_path),
         "promoted": False,
         "checks": checks,
@@ -71,7 +73,7 @@ def promote_if_qualified(
     if not all(checks.values()):
         report["rejection_reason"] = "candidate did not satisfy every promotion gate"
         return report
-    validate_paper_model(candidate, symbol, timeframe)
+    validate_paper_model(candidate, symbol, timeframe, feed=feed)
     candidate.to_json(target_path)
     report["candidate_model_sha256"] = file_sha256(target_path)
     report["promoted"] = True
@@ -102,6 +104,7 @@ def main() -> None:
         training_bars=args.training_bars, evaluation_bars=args.evaluation_bars,
         transaction_cost_bps=args.transaction_cost_bps, minimum_accuracy=args.minimum_accuracy,
         maximum_brier=args.maximum_brier, minimum_net_return_bps=args.minimum_net_return_bps,
+        feed=args.feed,
     )
     print(json.dumps(report, sort_keys=True))
     if not report["promoted"]:

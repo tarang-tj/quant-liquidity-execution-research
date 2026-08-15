@@ -40,7 +40,9 @@ reported as a normal state; malformed or unavailable state fails the check.
 
 ## Stage 2: causal evaluation and promotion
 
-Use the same feed entitlement for training, evaluation, and runtime. Evaluate
+Use the same feed entitlement for training, evaluation, and runtime. The model
+artifact records that feed and runtime rejects mismatches or legacy artifacts
+without feed provenance. Evaluate
 chronologically and include a transaction-cost stress that is conservative for
 the intended order size:
 
