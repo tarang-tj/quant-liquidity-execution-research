@@ -65,6 +65,7 @@ def run_retraining(
     report_path: Path | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     feed: str = "iex",
+    adjustment: str = "all",
 ) -> list[dict[str, object]]:
     """Run a finite number of fresh-data promotion cycles.
 
@@ -81,7 +82,9 @@ def run_retraining(
         raise ValueError("bars must be an integer between 2 and 10,000")
     if feed not in {"iex", "sip"}:
         raise ValueError("feed must be either 'iex' or 'sip'")
-    client = data_client or AlpacaMarketDataClient(feed=feed)
+    if adjustment not in {"raw", "split", "dividend", "all"}:
+        raise ValueError("adjustment must be one of 'raw', 'split', 'dividend', or 'all'")
+    client = data_client or AlpacaMarketDataClient(feed=feed, adjustment=adjustment)
     reports: list[dict[str, object]] = []
     for cycle in range(iterations):
         ordered_bars = client.bars(symbol, limit=bars, timeframe="1Min")
@@ -96,6 +99,7 @@ def run_retraining(
             maximum_brier=maximum_brier,
             minimum_net_return_bps=minimum_net_return_bps,
             feed=feed,
+            adjustment=adjustment,
         )
         report = {
             **report,
@@ -103,6 +107,7 @@ def run_retraining(
             "cycle": cycle,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "feed": feed,
+            "adjustment": adjustment,
             "bar_count": len(ordered_bars),
             "order_submission_attempted": False,
             "paper_only": True,
@@ -120,6 +125,8 @@ def main() -> None:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
                         help="Alpaca market-data feed; SIP requires the appropriate entitlement")
+    parser.add_argument("--adjustment", choices=("raw", "split", "dividend", "all"), default="all",
+                        help="corporate-action adjustment applied to historical bars")
     parser.add_argument("--iterations", type=int, default=1,
                         help="finite number of promotion cycles; never runs unbounded")
     parser.add_argument("--interval-seconds", type=float, default=3_600.0)
@@ -149,6 +156,7 @@ def main() -> None:
         minimum_net_return_bps=args.minimum_net_return_bps,
         report_path=args.report,
         feed=args.feed,
+        adjustment=args.adjustment,
     )
     for report in reports:
         print(json.dumps(report, sort_keys=True))

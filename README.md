@@ -62,8 +62,10 @@ not the midpoint; order submission has no automatic retry path.
    Commands default to the IEX feed. Where your account is entitled to
    consolidated SIP data, pass `--feed sip` consistently to training,
    walk-forward evaluation, preflight, monitoring, and paper evaluation. The
-   model JSON records its training feed, and runtime gates reject an IEX/SIP
-   mismatch (including legacy artifacts with no feed provenance).
+   default `--adjustment all` applies split, dividend, and spin-off adjustments
+   to historical bars; use the same policy everywhere. Model JSON records both
+   feed and adjustment policy, and runtime gates reject mismatches (including
+   legacy artifacts without either provenance field).
 2. Train using historical bars. The command below fetches bars only when data
    credentials are present; `--input` supports an offline CSV with
    `timestamp,open,high,low,close,volume` for reproducible tests. A bundled
@@ -74,7 +76,7 @@ not the midpoint; order submission has no automatic retry path.
    never a partially written artifact:
 
    ```bash
-   python live/train_predictor.py --symbol SPY --bars 1000
+   python live/train_predictor.py --symbol SPY --bars 1000 --adjustment all
    python live/train_predictor.py --symbol SPY --input tests/fixtures/spy_bars.csv --output /tmp/spy_model.json
    ```
 
@@ -206,7 +208,7 @@ journal (use `--decision-log <path>` only when the journal is non-default).
 The free Alpaca IEX feed is single-exchange data, not a consolidated market
 feed. The WebSocket adapter uses a bounded reconnect budget and fails closed
 when it is exhausted. A production system also needs entitlement-appropriate
-consolidated data, replay/gap recovery, corporate-action adjustments, backtests with real
+consolidated data, replay/gap recovery, backtests with real
 transaction costs, independent model/risk approval, monitoring, and a long
 paper-trading record before live capital is considered.
 

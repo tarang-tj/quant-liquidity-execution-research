@@ -139,14 +139,18 @@ class AlpacaMarketDataClient:
     base_url = "https://data.alpaca.markets"
 
     def __init__(self, key: str | None = None, secret: str | None = None, feed: str = "iex",
-                 max_retries: int = 2, retry_backoff_seconds: float = 0.5) -> None:
+                 adjustment: str = "all", max_retries: int = 2,
+                 retry_backoff_seconds: float = 0.5) -> None:
         self.key = key or os.environ.get("ALPACA_DATA_KEY")
         self.secret = secret or os.environ.get("ALPACA_DATA_SECRET")
         self.feed = feed
+        self.adjustment = adjustment
         if not self.key or not self.secret:
             raise MarketDataError("set ALPACA_DATA_KEY and ALPACA_DATA_SECRET; never put credentials in source files")
         if feed not in {"iex", "sip"}:
             raise ValueError("feed must be either 'iex' or 'sip'")
+        if adjustment not in {"raw", "split", "dividend", "all"}:
+            raise ValueError("adjustment must be one of 'raw', 'split', 'dividend', or 'all'")
         if not isinstance(max_retries, int) or isinstance(max_retries, bool) or not 0 <= max_retries <= 5:
             raise ValueError("max_retries must be an integer between 0 and 5")
         if (isinstance(retry_backoff_seconds, bool) or not isinstance(retry_backoff_seconds, (int, float))
@@ -201,7 +205,10 @@ class AlpacaMarketDataClient:
         if cutoff.tzinfo is None:
             raise ValueError("completed_before must be timezone-aware")
         cutoff = cutoff.astimezone(timezone.utc).replace(second=0, microsecond=0)
-        payload = self._get_json(f"/v2/stocks/{symbol.upper()}/bars", {"timeframe": timeframe, "limit": str(limit), "feed": self.feed})
+        payload = self._get_json(f"/v2/stocks/{symbol.upper()}/bars", {
+            "timeframe": timeframe, "limit": str(limit), "feed": self.feed,
+            "adjustment": self.adjustment,
+        })
         raw_bars = payload.get("bars")
         if not isinstance(raw_bars, list):
             raise MarketDataError("bar response does not contain a bars list")

@@ -45,6 +45,7 @@ class ModelReport:
     training_symbol: str | None = None
     training_timeframe: str | None = None
     training_feed: str | None = None
+    training_adjustment: str | None = None
     training_start: str | None = None
     training_end: str | None = None
     training_data_sha256: str | None = None
@@ -71,6 +72,7 @@ class LogisticDirectionModel:
             raise ValueError("model report fields have invalid primitive types")
         optional_text = (self.report.training_symbol, self.report.training_timeframe,
                          self.report.training_feed,
+                         self.report.training_adjustment,
                          self.report.training_start, self.report.training_end,
                          self.report.training_data_sha256, self.report.training_config_sha256,
                          self.report.created_at)
@@ -82,6 +84,9 @@ class LogisticDirectionModel:
             raise ValueError("training_timeframe must not be empty")
         if self.report.training_feed is not None and self.report.training_feed not in {"iex", "sip"}:
             raise ValueError("training_feed must be either 'iex' or 'sip'")
+        if (self.report.training_adjustment is not None and
+                self.report.training_adjustment not in {"raw", "split", "dividend", "all"}):
+            raise ValueError("training_adjustment must be one of 'raw', 'split', 'dividend', or 'all'")
         for name, digest in (("training_data_sha256", self.report.training_data_sha256),
                              ("training_config_sha256", self.report.training_config_sha256)):
             if digest is not None and (len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)):
@@ -236,7 +241,7 @@ def training_config_sha256(*, lookback: int, validation_fraction: float, learnin
 
 
 def validate_paper_model(model: LogisticDirectionModel, symbol: str, timeframe: str = "1Min",
-                         feed: str | None = None) -> None:
+                         feed: str | None = None, adjustment: str | None = None) -> None:
     """Require a deployable artifact whose provenance matches the live paper feed."""
     report = model.report
     if not report.deployable_for_paper:
@@ -251,12 +256,19 @@ def validate_paper_model(model: LogisticDirectionModel, symbol: str, timeframe: 
             raise ValueError("feed must be either 'iex' or 'sip'")
         if report.training_feed != feed:
             raise ValueError("model training feed does not match the live market-data feed")
+    if adjustment is not None:
+        if adjustment not in {"raw", "split", "dividend", "all"}:
+            raise ValueError("adjustment must be one of 'raw', 'split', 'dividend', or 'all'")
+        if report.training_adjustment != adjustment:
+            raise ValueError("model training adjustment does not match the live market-data policy")
     if any(value is None for value in (report.training_start, report.training_end,
                                        report.training_data_sha256, report.training_config_sha256,
                                        report.created_at)):
         raise ValueError("model lacks complete training provenance for paper evaluation")
     if feed is not None and report.training_feed is None:
         raise ValueError("model lacks training-feed provenance for paper evaluation")
+    if adjustment is not None and report.training_adjustment is None:
+        raise ValueError("model lacks corporate-action adjustment provenance for paper evaluation")
 
 
 def validate_model_data_alignment(model: LogisticDirectionModel, bars: list[Bar],
@@ -292,12 +304,15 @@ def validate_model_data_alignment(model: LogisticDirectionModel, bars: list[Bar]
 
 def train_direction_model(bars: list[Bar], lookback: int = 20, validation_fraction: float = 0.30,
                           learning_rate: float = 0.08, iterations: int = 1_500, l2: float = 0.02,
-                          timeframe: str = "1Min", feed: str | None = None) -> LogisticDirectionModel:
+                          timeframe: str = "1Min", feed: str | None = None,
+                          adjustment: str | None = "all") -> LogisticDirectionModel:
     """Chronological train/validation split with deterministic full-batch logistic fitting."""
     if not isinstance(timeframe, str) or not timeframe.strip():
         raise ValueError("timeframe must be a non-empty string")
     if feed is not None and feed not in {"iex", "sip"}:
         raise ValueError("feed must be either 'iex' or 'sip'")
+    if adjustment is not None and adjustment not in {"raw", "split", "dividend", "all"}:
+        raise ValueError("adjustment must be one of 'raw', 'split', 'dividend', or 'all'")
     if (isinstance(validation_fraction, bool) or not isinstance(validation_fraction, (int, float)) or
             not np.isfinite(validation_fraction) or not 0 < validation_fraction < 1):
         raise ValueError("validation_fraction must be strictly between 0 and 1")
@@ -334,6 +349,7 @@ def train_direction_model(bars: list[Bar], lookback: int = 20, validation_fracti
         training_symbol=bars[0].symbol.upper(),
         training_timeframe=timeframe,
         training_feed=feed,
+        training_adjustment=adjustment,
         training_start=bars[0].timestamp.astimezone(timezone.utc).isoformat(),
         training_end=bars[-1].timestamp.astimezone(timezone.utc).isoformat(),
         training_data_sha256=training_data_sha256(bars),

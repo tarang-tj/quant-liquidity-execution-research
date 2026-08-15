@@ -47,6 +47,8 @@ def walk_forward_evaluate(
     iterations: int = 1_500,
     l2: float = 0.02,
     transaction_cost_bps: float = 5.0,
+    feed: str | None = None,
+    adjustment: str | None = "all",
 ) -> WalkForwardSummary:
     """Evaluate sequential blocks without using any future bar in a fit.
 
@@ -93,6 +95,7 @@ def walk_forward_evaluate(
         model = train_direction_model(
             bars[:origin], lookback=lookback, validation_fraction=validation_fraction,
             learning_rate=learning_rate, iterations=iterations, l2=l2, timeframe=timeframe,
+            feed=feed, adjustment=adjustment,
         )
         stop = min(origin + evaluation_bars, len(bars) - 1)
         for t in range(origin, stop):

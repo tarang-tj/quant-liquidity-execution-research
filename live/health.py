@@ -46,6 +46,7 @@ def run_health(
     max_bar_gap_seconds: float | None = None,
     max_quality_age_seconds: float = 86_400.0,
     feed: str = "iex",
+    adjustment: str = "all",
 ) -> dict[str, object]:
     """Return one fail-closed health decision without submitting an order."""
     checks: list[dict[str, object]] = []
@@ -75,6 +76,7 @@ def run_health(
         max_training_gap_seconds=max_training_gap_seconds,
         max_bar_gap_seconds=max_bar_gap_seconds,
         feed=feed,
+        adjustment=adjustment,
     )
     checks.extend(preflight["checks"])
 
@@ -108,6 +110,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Read-only paper-session health snapshot")
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--feed", choices=("iex", "sip"), default="iex")
+    parser.add_argument("--adjustment", choices=("raw", "split", "dividend", "all"), default="all")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--quality-report", type=Path, required=True)
     parser.add_argument("--decision-log", type=Path, required=True)
@@ -129,6 +132,7 @@ def main() -> None:
                              else args.max_bar_gap_minutes * 60),
         max_quality_age_seconds=args.max_quality_age_hours * 3_600,
         feed=args.feed,
+        adjustment=args.adjustment,
     )
     print(json.dumps(report, sort_keys=True))
     if not report["ready_for_paper_session"]:

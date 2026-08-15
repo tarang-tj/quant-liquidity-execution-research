@@ -121,6 +121,8 @@ def main() -> None:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--feed", choices=("iex", "sip"), default="iex",
                         help="Alpaca market-data feed; SIP requires the appropriate entitlement")
+    parser.add_argument("--adjustment", choices=("raw", "split", "dividend", "all"), default="all",
+                        help="corporate-action adjustment applied to historical bars")
     parser.add_argument("--model", type=Path)
     parser.add_argument("--history-bars", type=int, default=100)
     parser.add_argument("--max-training-gap-hours", type=float,
@@ -136,12 +138,12 @@ def main() -> None:
     parser.add_argument("--max-quality-age-hours", type=float, default=24.0,
                         help="maximum age of the required quality report")
     args = parser.parse_args()
-    client = AlpacaMarketDataClient(feed=args.feed)
+    client = AlpacaMarketDataClient(feed=args.feed, adjustment=args.adjustment)
     quote = client.latest_quote(args.symbol)
     JsonlEventStore(ROOT / "runtime" / "quotes.jsonl").append_quotes([quote])
     model_path = args.model or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"
     model = LogisticDirectionModel.from_json(model_path)
-    validate_paper_model(model, args.symbol, feed=args.feed)
+    validate_paper_model(model, args.symbol, feed=args.feed, adjustment=args.adjustment)
     if args.submit_paper_order:
         if args.quality_report is None:
             raise ValueError("--quality-report is required with --submit-paper-order")

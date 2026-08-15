@@ -40,9 +40,10 @@ reported as a normal state; malformed or unavailable state fails the check.
 
 ## Stage 2: causal evaluation and promotion
 
-Use the same feed entitlement for training, evaluation, and runtime. The model
-artifact records that feed and runtime rejects mismatches or legacy artifacts
-without feed provenance. Evaluate
+Use the same feed entitlement and corporate-action adjustment policy for
+training, evaluation, and runtime. The model artifact records both and runtime
+rejects mismatches or legacy artifacts without provenance. The default
+adjustment policy is `all` (splits, dividends, and spin-offs). Evaluate
 chronologically and include a transaction-cost stress that is conservative for
 the intended order size:
 

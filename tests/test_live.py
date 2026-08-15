@@ -87,6 +87,7 @@ class LiveBridgeTest(unittest.TestCase):
         self.assertGreaterEqual(model.report.validation_observations, 20)
         self.assertEqual(model.report.training_symbol, "SPY")
         self.assertEqual(model.report.training_timeframe, "1Min")
+        self.assertEqual(model.report.training_adjustment, "all")
         self.assertEqual(model.report.training_start, self.bars[0].timestamp.isoformat())
         self.assertEqual(model.report.training_end, self.bars[-1].timestamp.isoformat())
         self.assertEqual(model.report.training_data_sha256, training_data_sha256(self.bars))
@@ -437,6 +438,17 @@ class LiveBridgeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_paper_model(legacy, "SPY", feed="sip")
 
+    def test_paper_model_requires_matching_corporate_action_adjustment(self) -> None:
+        model = train_direction_model(self.bars, feed="iex", adjustment="all")
+        model = replace(model, report=replace(model.report, validation_observations=100,
+                                             deployable_for_paper=True))
+        validate_paper_model(model, "SPY", feed="iex", adjustment="all")
+        with self.assertRaises(ValueError):
+            validate_paper_model(model, "SPY", feed="iex", adjustment="raw")
+        legacy = replace(model, report=replace(model.report, training_adjustment=None))
+        with self.assertRaises(ValueError):
+            validate_paper_model(legacy, "SPY", feed="iex", adjustment="all")
+
     def test_walk_forward_evaluation_is_causal_and_against_baseline(self) -> None:
         summary = walk_forward_evaluate(self.bars, training_bars=120, evaluation_bars=20, iterations=300)
         self.assertEqual(summary.symbol, "SPY")
@@ -535,7 +547,11 @@ class LiveBridgeTest(unittest.TestCase):
     def test_market_data_feed_is_explicitly_limited_to_supported_alpaca_feeds(self) -> None:
         with self.assertRaises(ValueError):
             AlpacaMarketDataClient(key="data-key", secret="data-secret", feed="unknown")
-        self.assertEqual(AlpacaMarketDataClient(key="data-key", secret="data-secret", feed="sip").feed, "sip")
+        with self.assertRaises(ValueError):
+            AlpacaMarketDataClient(key="data-key", secret="data-secret", adjustment="unknown")
+        client = AlpacaMarketDataClient(key="data-key", secret="data-secret", feed="sip", adjustment="split")
+        self.assertEqual(client.feed, "sip")
+        self.assertEqual(client.adjustment, "split")
 
     def test_market_data_retries_transient_transport_failure_with_bound(self) -> None:
         client = AlpacaMarketDataClient(key="data-key", secret="data-secret", max_retries=1,
@@ -557,9 +573,10 @@ class LiveBridgeTest(unittest.TestCase):
             {"t": "2026-01-02T14:31:00Z", "o": 100, "h": 101, "l": 99, "c": 100, "v": 10},
             {"t": "2026-01-02T14:32:00Z", "o": 100, "h": 999, "l": 1, "c": 999, "v": 999},
         ]}
-        with patch.object(client, "_get_json", return_value=payload):
+        with patch.object(client, "_get_json", return_value=payload) as get_json:
             bars = client.bars("SPY", limit=3, completed_before=now)
         self.assertEqual([bar.timestamp.minute for bar in bars], [30, 31])
+        self.assertEqual(get_json.call_args.args[1]["adjustment"], "all")
 
     def test_quote_event_store_serializes_concurrent_durable_appends(self) -> None:
         from live.market_data import JsonlEventStore

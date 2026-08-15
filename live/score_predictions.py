@@ -166,6 +166,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Score journaled live predictions without submitting orders")
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--feed", choices=("iex", "sip"), default="iex")
+    parser.add_argument("--adjustment", choices=("raw", "split", "dividend", "all"), default="all")
     parser.add_argument("--decision-log", type=Path, required=True)
     parser.add_argument("--bars", type=int, default=1_000)
     parser.add_argument("--minimum-scored", type=int, default=20)
@@ -175,7 +176,7 @@ def main() -> None:
                         help="optional path for an atomic model-pinned quality report")
     args = parser.parse_args()
     decisions = PaperDecisionLog(args.decision_log).read()
-    bars = AlpacaMarketDataClient(feed=args.feed).bars(args.symbol, limit=args.bars)
+    bars = AlpacaMarketDataClient(feed=args.feed, adjustment=args.adjustment).bars(args.symbol, limit=args.bars)
     report = build_quality_report(
         decisions,
         score_predictions(decisions, bars, symbol=args.symbol),
