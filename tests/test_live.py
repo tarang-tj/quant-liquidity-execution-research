@@ -239,6 +239,10 @@ class LiveBridgeTest(unittest.TestCase):
         self.assertTrue(0 <= summary.accuracy <= 1)
         self.assertTrue(0 <= summary.brier <= 1)
         self.assertTrue(0.5 <= summary.majority_baseline_accuracy <= 1)
+        self.assertEqual(summary.transaction_cost_bps, 5.0)
+        self.assertGreater(summary.turnover_units, 0)
+        self.assertLessEqual(summary.net_return_bps, summary.gross_return_bps)
+        self.assertGreaterEqual(summary.max_drawdown_bps, 0)
         changed = self.bars.copy()
         for index in range(121, len(changed)):
             bar = changed[index]
@@ -251,7 +255,8 @@ class LiveBridgeTest(unittest.TestCase):
             baseline_model.predict_probability(live_features(self.bars[:121])),
             changed_model.predict_probability(live_features(changed[:121])), places=12)
         for kwargs in ({"validation_fraction": 0}, {"learning_rate": float("nan")},
-                       {"iterations": 0}, {"l2": -1}, {"lookback": "20"}):
+                       {"iterations": 0}, {"l2": -1}, {"lookback": "20"},
+                       {"transaction_cost_bps": float("nan")}, {"transaction_cost_bps": -1}):
             with self.assertRaises(ValueError):
                 walk_forward_evaluate(self.bars, training_bars=120, evaluation_bars=20, **kwargs)
 

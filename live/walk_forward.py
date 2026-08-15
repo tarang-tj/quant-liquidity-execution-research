@@ -23,6 +23,11 @@ class WalkForwardSummary:
     accuracy: float
     brier: float
     majority_baseline_accuracy: float
+    transaction_cost_bps: float
+    turnover_units: float
+    gross_return_bps: float
+    net_return_bps: float
+    max_drawdown_bps: float
     first_prediction: str
     last_prediction: str
 
@@ -41,6 +46,7 @@ def walk_forward_evaluate(
     learning_rate: float = 0.08,
     iterations: int = 1_500,
     l2: float = 0.02,
+    transaction_cost_bps: float = 5.0,
 ) -> WalkForwardSummary:
     """Evaluate sequential blocks without using any future bar in a fit.
 
@@ -67,6 +73,9 @@ def walk_forward_evaluate(
     if (isinstance(l2, bool) or not isinstance(l2, (int, float)) or
             not isfinite(l2) or l2 < 0):
         raise ValueError("l2 must be a finite non-negative number")
+    if (isinstance(transaction_cost_bps, bool) or not isinstance(transaction_cost_bps, (int, float)) or
+            not isfinite(transaction_cost_bps) or transaction_cost_bps < 0):
+        raise ValueError("transaction_cost_bps must be a finite non-negative number")
     if len(bars) < training_bars + 2:
         raise ValueError("need at least training_bars + 2 bars for walk-forward evaluation")
     sample_count = training_bars - lookback - 1
@@ -79,6 +88,7 @@ def walk_forward_evaluate(
     origins = range(training_bars, len(bars) - 1, evaluation_bars)
     probabilities: list[float] = []
     targets: list[float] = []
+    prediction_indices: list[int] = []
     for origin in origins:
         model = train_direction_model(
             bars[:origin], lookback=lookback, validation_fraction=validation_fraction,
@@ -89,12 +99,24 @@ def walk_forward_evaluate(
             probability = model.predict_probability(live_features(bars[:t + 1], lookback))
             probabilities.append(probability)
             targets.append(float(bars[t + 1].close > bars[t].close))
+            prediction_indices.append(t)
 
     if not probabilities or not all(isfinite(value) for value in probabilities):
         raise ValueError("walk-forward evaluation produced no finite predictions")
     target_array = np.asarray(targets, dtype=float)
     probability_array = np.asarray(probabilities, dtype=float)
     majority = max(float(target_array.mean()), 1.0 - float(target_array.mean()))
+    positions = np.where(probability_array >= 0.5, 1.0, -1.0)
+    close_returns = np.asarray([
+        np.log(float(bars[index + 1].close) / float(bars[index].close))
+        for index in prediction_indices
+    ], dtype=float)
+    turnover = float(np.abs(np.diff(np.concatenate(([0.0], positions)))).sum())
+    gross_bps = float(np.sum(positions * close_returns) * 10_000.0)
+    net_bps = gross_bps - turnover * float(transaction_cost_bps)
+    cumulative_net = np.cumsum(positions * close_returns) * 10_000.0
+    running_peak = np.maximum.accumulate(np.concatenate(([0.0], cumulative_net)))
+    max_drawdown = float(np.max(running_peak[1:] - cumulative_net))
     return WalkForwardSummary(
         symbol=bars[0].symbol.upper(), timeframe=timeframe,
         training_bars=training_bars, evaluation_block_size=evaluation_bars,
@@ -103,6 +125,11 @@ def walk_forward_evaluate(
         accuracy=float(np.mean((probability_array >= 0.5) == target_array)),
         brier=float(np.mean((probability_array - target_array) ** 2)),
         majority_baseline_accuracy=majority,
+        transaction_cost_bps=float(transaction_cost_bps),
+        turnover_units=turnover,
+        gross_return_bps=gross_bps,
+        net_return_bps=net_bps,
+        max_drawdown_bps=max_drawdown,
         first_prediction=bars[training_bars].timestamp.isoformat(),
         last_prediction=bars[training_bars + len(probabilities) - 1].timestamp.isoformat(),
     )

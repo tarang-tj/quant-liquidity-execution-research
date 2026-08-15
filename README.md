@@ -13,7 +13,9 @@ instead of assuming the same liquidity probability over its whole horizon.
 It reports implementation shortfall, 95% VaR/CVaR, calibration, paired
 common-path bootstrap contrasts, hard capacity/completion checks, an explicitly
 non-deployable oracle diagnostic, a four-case robustness panel, and an
-auditable completed-batch recalibration loop. Seven fast invariant tests cover
+an auditable completed-batch recalibration loop. The live bridge also has a
+causal walk-forward evaluator that reports prediction metrics plus a transparent
+turnover and transaction-cost stress accounting. Thirty-six fast invariant tests cover
 causality, forecast dynamics, gradients, constraints, path alignment, and
 two-cycle continual-learning timing.
 
@@ -61,10 +63,11 @@ predictions use only completed minute bars, never the in-progress bar.
 
    Before considering a model for paper use, run a causal walk-forward check.
    Each block is fit only on bars strictly before that block; the result also
-   reports a majority-class baseline:
+   reports a majority-class baseline, gross/net return in basis points,
+   turnover, and the assumed transaction-cost stress:
 
    ```bash
-   python live/evaluate_walk_forward.py --symbol SPY --bars 1000 --training-bars 120 --evaluation-bars 120
+   python live/evaluate_walk_forward.py --symbol SPY --bars 1000 --training-bars 120 --evaluation-bars 120 --transaction-cost-bps 5
    ```
 
 3. Evaluate a fresh quote and print the paper-order recommendation. It does not
