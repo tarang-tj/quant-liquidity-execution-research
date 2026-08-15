@@ -13,7 +13,7 @@ import os
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from live.market_data import Bar, Quote
 
@@ -60,6 +60,7 @@ class PaperDecision:
     submission_error: str | None = None
     client_order_id: str | None = None
     submission_state: str = "not_requested"
+    broker_order_status: str | None = None
     previous_hash: str | None = None
     record_hash: str | None = None
 
@@ -102,15 +103,46 @@ class PaperDecisionLog:
             try:
                 handle.seek(0)
                 existing = self._parse_lines(handle.read().splitlines())
-                previous_hash = existing[-1].record_hash if existing else None
-                committed = replace(decision, previous_hash=previous_hash, record_hash=None)
-                committed = replace(committed, record_hash=self._hash_record(committed))
-                handle.seek(0, os.SEEK_END)
-                handle.write(json.dumps(asdict(committed), sort_keys=True, separators=(",", ":")) + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+                committed = self._append_locked(handle, existing, decision)
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return committed
+
+    def transition_latest(
+        self, client_order_id: str, expected_submission_state: str,
+        transform: Callable[[PaperDecision], PaperDecision],
+    ) -> PaperDecision:
+        """Atomically append a transition only if this request remains in a state.
+
+        The lookup, lifecycle guard, hash-link calculation, and fsynced append
+        share one exclusive lock, so concurrent recovery processes cannot both
+        resolve the same idempotency key.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        import fcntl
+        with self.path.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.seek(0)
+                existing = self._parse_lines(handle.read().splitlines())
+                prior = next((event for event in reversed(existing)
+                              if event.client_order_id == client_order_id), None)
+                if prior is None:
+                    raise ValueError("no journaled paper decision matches client_order_id")
+                if prior.submission_state != expected_submission_state:
+                    raise ValueError("latest journal state does not permit this transition")
+                return self._append_locked(handle, existing, transform(prior))
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def _append_locked(self, handle: Any, existing: list[PaperDecision], decision: PaperDecision) -> PaperDecision:
+        previous_hash = existing[-1].record_hash if existing else None
+        committed = replace(decision, previous_hash=previous_hash, record_hash=None)
+        committed = replace(committed, record_hash=self._hash_record(committed))
+        handle.seek(0, os.SEEK_END)
+        handle.write(json.dumps(asdict(committed), sort_keys=True, separators=(",", ":")) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
         return committed
 
     @classmethod
@@ -125,7 +157,13 @@ class PaperDecisionLog:
                 decision = PaperDecision(**raw)
                 if decision.previous_hash != expected_previous_hash or not decision.record_hash:
                     raise ValueError("broken decision-log hash chain")
-                if decision.record_hash != cls._hash_record(decision):
+                # Validate the exact stored schema, not the current dataclass
+                # shape. Optional fields added by a later release must not
+                # invalidate a durable journal written before that release.
+                stored_payload = dict(raw)
+                stored_payload["record_hash"] = None
+                encoded = json.dumps(stored_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                if decision.record_hash != hashlib.sha256(encoded).hexdigest():
                     raise ValueError("decision-log record hash does not match")
                 expected_previous_hash = decision.record_hash
                 decisions.append(decision)

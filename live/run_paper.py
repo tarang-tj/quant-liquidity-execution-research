@@ -23,25 +23,59 @@ from live.risk import OrderIntent, RiskLimits, validate_paper_order
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _already_reconciled(decision_log: PaperDecisionLog, client_order_id: str,
+                        expected_paper_order_id: str | None = None) -> bool:
+    """Recognize a competing recovery only when it resolved this same request."""
+    latest = next((event for event in reversed(decision_log.read())
+                   if event.client_order_id == client_order_id), None)
+    if latest is None or latest.event_kind != "reconciliation_result":
+        return False
+    return expected_paper_order_id is None or latest.paper_order_id == expected_paper_order_id
+
+
 def submit_and_record(broker: AlpacaPaperBroker, intent: OrderIntent, decision: PaperDecision,
                       decision_log: PaperDecisionLog) -> dict[str, object]:
     """Persist an uncertain attempt before network I/O, then record its outcome."""
     # This fsync'd record intentionally says "unknown" before sending: a
     # process crash after the request leaves this host must never make retrying
     # look safe. Reconcile by client_order_id first.
-    decision_log.append(replace(decision, timestamp=datetime.now(timezone.utc).isoformat(),
-                                event_kind="submission_attempt_started",
-                                submission_state="unknown_reconciliation_required"))
+    assert decision.client_order_id is not None
+    decision_log.transition_latest(
+        decision.client_order_id,
+        "not_requested",
+        lambda prior: replace(prior, timestamp=datetime.now(timezone.utc).isoformat(),
+                              event_kind="submission_attempt_started",
+                              submission_state="unknown_reconciliation_required"),
+    )
     try:
-        assert decision.client_order_id is not None
         order = broker.submit_market_order(intent, decision.client_order_id)
     except Exception as exc:
-        decision_log.append(replace(decision, timestamp=datetime.now(timezone.utc).isoformat(), event_kind="submission_outcome",
-            submission_error=type(exc).__name__, submission_state="unknown_reconciliation_required"))
+        try:
+            decision_log.transition_latest(
+                decision.client_order_id,
+                "unknown_reconciliation_required",
+                lambda prior: replace(prior, timestamp=datetime.now(timezone.utc).isoformat(),
+                                      event_kind="submission_outcome", submission_error=type(exc).__name__,
+                                      submission_state="unknown_reconciliation_required"),
+            )
+        except ValueError:
+            if not _already_reconciled(decision_log, decision.client_order_id):
+                raise
         raise
-    decision_log.append(replace(decision, timestamp=datetime.now(timezone.utc).isoformat(), event_kind="submission_outcome", submitted=True,
-        paper_order_id=str(order.get("id")) if order.get("id") is not None else None,
-        submission_state="submitted"))
+    paper_order_id = order.get("id")
+    if not isinstance(paper_order_id, str) or not paper_order_id:
+        raise ValueError("paper broker submission response lacks a non-empty id; reconcile before retrying")
+    try:
+        decision_log.transition_latest(
+            decision.client_order_id,
+            "unknown_reconciliation_required",
+            lambda prior: replace(prior, timestamp=datetime.now(timezone.utc).isoformat(),
+                                  event_kind="submission_outcome", submitted=True, paper_order_id=paper_order_id,
+                                  submission_state="submitted"),
+        )
+    except ValueError:
+        if not _already_reconciled(decision_log, decision.client_order_id, paper_order_id):
+            raise
     return order
 
 

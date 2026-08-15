@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 import json
+import hashlib
 import multiprocessing
 import os
 import tempfile
@@ -18,6 +19,7 @@ from live.market_data import AlpacaMarketDataClient, Bar, MarketDataError, Quote
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker, PaperRiskState
 from live.predictor import LogisticDirectionModel, causal_training_matrix, live_features, train_direction_model
+from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record
 from live.risk import OrderIntent, RiskLimits, validate_paper_order
@@ -26,6 +28,18 @@ from live.risk import OrderIntent, RiskLimits, validate_paper_order
 def append_in_child(log_path: str, decision: PaperDecision, start: object) -> None:
     start.wait()
     PaperDecisionLog(Path(log_path)).append(decision)
+
+
+def reconcile_in_child(log_path: str, client_order_id: str, start: object, outcomes: object) -> None:
+    start.wait()
+    try:
+        record_reconciliation_result(PaperDecisionLog(Path(log_path)), client_order_id, {
+            "id": "paper-order", "status": "filled", "client_order_id": client_order_id,
+        })
+    except ValueError:
+        outcomes.put(False)
+    else:
+        outcomes.put(True)
 
 
 class LiveBridgeTest(unittest.TestCase):
@@ -119,7 +133,7 @@ class LiveBridgeTest(unittest.TestCase):
     def test_reconciliation_uses_fixed_paper_endpoint(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
         with patch("live.paper_broker.urlopen") as open_mock:
-            open_mock.return_value.__enter__.return_value.read.return_value = b'{"id":"paper-order","status":"new"}'
+            open_mock.return_value.__enter__.return_value.read.return_value = b'{"id":"paper-order","status":"new","client_order_id":"paper-test-order"}'
             response = broker.order_by_client_order_id("paper-test-order")
         self.assertEqual(response["status"], "new")
         self.assertEqual(open_mock.call_args.args[0].full_url,
@@ -177,6 +191,31 @@ class LiveBridgeTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 replay(model_path, log_path)
 
+    def test_decision_log_reads_legacy_record_without_new_optional_field(self) -> None:
+        model = train_direction_model(self.bars)
+        features = live_features(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, log_path = folder / "model.json", folder / "legacy.jsonl"
+            model.to_json(model_path)
+            decision = PaperDecision.create(
+                model_path=model_path, symbol="SPY", quote=self.quote, bars=self.bars, features=features.tolist(),
+                probability=model.predict_probability(features), side="buy", risk_approved=True,
+                risk_reason="fixture", risk_source="fixture", broker_position=None, broker_daily_pnl=None)
+            legacy = dict(decision.__dict__) if hasattr(decision, "__dict__") else {
+                field: getattr(decision, field) for field in decision.__dataclass_fields__
+            }
+            legacy.pop("broker_order_status")
+            legacy["record_hash"] = None
+            legacy["record_hash"] = hashlib.sha256(
+                json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            log_path.write_text(json.dumps(legacy, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+            records = PaperDecisionLog(log_path).read()
+            self.assertEqual(len(records), 1)
+            self.assertIsNone(records[0].broker_order_status)
+            self.assertAlmostEqual(replay(model_path, log_path), model.predict_probability(features))
+
     def test_failed_paper_submission_writes_terminal_outcome(self) -> None:
         model = train_direction_model(self.bars)
         features = live_features(self.bars)
@@ -208,6 +247,91 @@ class LiveBridgeTest(unittest.TestCase):
             self.assertEqual(events[1].submission_state, "unknown_reconciliation_required")
             self.assertEqual(events[-1].submission_error, "MarketDataError")
             self.assertEqual(events[-1].submission_state, "unknown_reconciliation_required")
+
+    def test_reconciliation_appends_verified_terminal_result(self) -> None:
+        model = train_direction_model(self.bars)
+        features = live_features(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, log_path = folder / "model.json", folder / "decisions.jsonl"
+            model.to_json(model_path)
+            journal = PaperDecisionLog(log_path)
+            decision = journal.append(PaperDecision.create(
+                model_path=model_path, symbol="SPY", quote=self.quote, bars=self.bars, features=features.tolist(),
+                probability=model.predict_probability(features), side="buy", risk_approved=True,
+                risk_reason="fixture", risk_source="fixture", broker_position=None, broker_daily_pnl=None,
+                client_order_id="paper-reconcile-test"))
+            journal.append(replace(decision, event_kind="submission_attempt_started",
+                                   submission_state="unknown_reconciliation_required"))
+            result = record_reconciliation_result(journal, "paper-reconcile-test", {
+                "id": "paper-order", "status": "filled", "client_order_id": "paper-reconcile-test",
+            })
+            self.assertEqual(result.event_kind, "reconciliation_result")
+            self.assertEqual(result.submission_state, "reconciled:filled")
+            self.assertEqual(result.broker_order_status, "filled")
+            self.assertEqual([event.event_kind for event in journal.read()],
+                             ["decision", "submission_attempt_started", "reconciliation_result"])
+            with self.assertRaises(ValueError):
+                record_reconciliation_result(journal, "paper-reconcile-test", {
+                    "id": "other-order", "status": "filled", "client_order_id": "other-client",
+                })
+
+    def test_submission_and_reconciliation_race_resolves_only_once(self) -> None:
+        model = train_direction_model(self.bars)
+        features = live_features(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, log_path = folder / "model.json", folder / "decisions.jsonl"
+            model.to_json(model_path)
+            journal = PaperDecisionLog(log_path)
+            decision = journal.append(PaperDecision.create(
+                model_path=model_path, symbol="SPY", quote=self.quote, bars=self.bars, features=features.tolist(),
+                probability=model.predict_probability(features), side="buy", risk_approved=True,
+                risk_reason="fixture", risk_source="fixture", broker_position=None, broker_daily_pnl=None,
+                client_order_id="paper-submit-race"))
+            broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
+
+            def reconcile_before_response(*_args: object) -> dict[str, object]:
+                record_reconciliation_result(journal, "paper-submit-race", {
+                    "id": "paper-order", "status": "filled", "client_order_id": "paper-submit-race",
+                })
+                return {"id": "paper-order"}
+
+            with patch.object(broker, "submit_market_order", side_effect=reconcile_before_response):
+                self.assertEqual(submit_and_record(broker, OrderIntent("SPY", "buy", 1), decision, journal),
+                                 {"id": "paper-order"})
+            self.assertEqual([event.event_kind for event in journal.read()],
+                             ["decision", "submission_attempt_started", "reconciliation_result"])
+
+    def test_concurrent_reconciliation_commits_only_one_result(self) -> None:
+        model = train_direction_model(self.bars)
+        features = live_features(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, log_path = folder / "model.json", folder / "decisions.jsonl"
+            model.to_json(model_path)
+            journal = PaperDecisionLog(log_path)
+            decision = journal.append(PaperDecision.create(
+                model_path=model_path, symbol="SPY", quote=self.quote, bars=self.bars, features=features.tolist(),
+                probability=model.predict_probability(features), side="buy", risk_approved=True,
+                risk_reason="fixture", risk_source="fixture", broker_position=None, broker_daily_pnl=None,
+                client_order_id="paper-concurrent-reconcile"))
+            journal.append(replace(decision, event_kind="submission_attempt_started",
+                                   submission_state="unknown_reconciliation_required"))
+            context = multiprocessing.get_context("spawn")
+            start, outcomes = context.Event(), context.Queue()
+            workers = [context.Process(target=reconcile_in_child,
+                                       args=(str(log_path), "paper-concurrent-reconcile", start, outcomes))
+                       for _ in range(2)]
+            for worker in workers:
+                worker.start()
+            start.set()
+            for worker in workers:
+                worker.join(timeout=10)
+                self.assertEqual(worker.exitcode, 0)
+            self.assertEqual(sorted(outcomes.get(timeout=2) for _ in workers), [False, True])
+            self.assertEqual([event.event_kind for event in journal.read()],
+                             ["decision", "submission_attempt_started", "reconciliation_result"])
 
     def test_concurrent_writers_preserve_a_single_hash_chain(self) -> None:
         model = train_direction_model(self.bars)

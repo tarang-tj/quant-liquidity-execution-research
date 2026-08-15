@@ -75,7 +75,9 @@ python live/replay_decision.py --model models/SPY_logistic.json --decision-log r
 The journal uses a locked, local integrity chain and is not a replacement for
 an external signed/WORM audit archive. Each paper request carries a unique
 client-order ID. If its network outcome is unknown, do not retry it; reconcile
-first with `python live/reconcile_paper.py --client-order-id <id>`.
+first with `python live/reconcile_paper.py --client-order-id <id>`. A verified
+broker lookup result is appended as a `reconciliation_result` event to the same
+journal (use `--decision-log <path>` only when the journal is non-default).
 
 The free Alpaca IEX feed is single-exchange data, not a consolidated market
 feed. A production system also needs entitlement-appropriate consolidated data,
