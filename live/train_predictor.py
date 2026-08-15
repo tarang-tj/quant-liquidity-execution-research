@@ -38,7 +38,7 @@ def main() -> None:
     args = parser.parse_args()
     bars = (read_csv(args.input, args.symbol) if args.input
             else AlpacaMarketDataClient(feed=args.feed).bars(args.symbol, limit=args.bars, timeframe=args.timeframe))
-    model = train_direction_model(bars, timeframe=args.timeframe)
+    model = train_direction_model(bars, timeframe=args.timeframe, feed=args.feed)
     output = args.output or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"
     model.to_json(output)
     print({"model": str(output), "report": model.report})

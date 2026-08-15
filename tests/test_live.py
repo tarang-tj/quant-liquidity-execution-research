@@ -82,7 +82,7 @@ class LiveBridgeTest(unittest.TestCase):
     def test_training_is_chronological_and_serializable(self) -> None:
         x, y = causal_training_matrix(self.bars)
         self.assertEqual(len(x), len(y))
-        model = train_direction_model(self.bars)
+        model = train_direction_model(self.bars, feed="iex")
         self.assertEqual(model.feature_mean.shape, (4,))
         self.assertGreaterEqual(model.report.validation_observations, 20)
         self.assertEqual(model.report.training_symbol, "SPY")
@@ -123,7 +123,7 @@ class LiveBridgeTest(unittest.TestCase):
             direction_from_probability(float("nan"), 0.05)
 
     def test_live_prediction_scoring_requires_the_immediate_next_bar(self) -> None:
-        model = train_direction_model(self.bars)
+        model = train_direction_model(self.bars, feed="iex")
         with tempfile.TemporaryDirectory() as directory:
             model_path = Path(directory) / "model.json"
             model.to_json(model_path)
@@ -156,7 +156,7 @@ class LiveBridgeTest(unittest.TestCase):
                              "live_quality_gate")
 
     def test_quality_report_is_fresh_and_pinned_before_paper_submission(self) -> None:
-        model = train_direction_model(self.bars)
+        model = train_direction_model(self.bars, feed="iex")
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             model_path, report_path = folder / "model.json", folder / "quality.json"
@@ -183,7 +183,7 @@ class LiveBridgeTest(unittest.TestCase):
                                             max_age_seconds=60)
 
     def test_health_snapshot_requires_quality_and_valid_journal_without_submission(self) -> None:
-        model = train_direction_model(self.bars)
+        model = train_direction_model(self.bars, feed="iex")
         deployable = replace(model, report=replace(model.report, validation_observations=100,
                                                    deployable_for_paper=True))
         with tempfile.TemporaryDirectory() as directory:
@@ -269,7 +269,7 @@ class LiveBridgeTest(unittest.TestCase):
             self.assertEqual([report["schema"] for report in persisted], ["paper_model_promotion.v1"] * 2)
 
     def test_read_only_preflight_checks_data_model_and_paper_broker(self) -> None:
-        model = train_direction_model(self.bars)
+        model = train_direction_model(self.bars, feed="iex")
         deployable = replace(model, report=replace(model.report, validation_observations=100, deployable_for_paper=True))
         with tempfile.TemporaryDirectory() as directory:
             model_path = Path(directory) / "model.json"
@@ -293,7 +293,7 @@ class LiveBridgeTest(unittest.TestCase):
         self.assertFalse(hasattr(broker, "submit_market_order") and broker.submit_market_order.called)
 
     def test_finite_read_only_monitor_records_each_sample_without_submission(self) -> None:
-        model = train_direction_model(self.bars)
+        model = train_direction_model(self.bars, feed="iex")
         deployable = replace(model, report=replace(model.report, validation_observations=100, deployable_for_paper=True))
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -425,6 +425,17 @@ class LiveBridgeTest(unittest.TestCase):
         legacy = replace(model, report=legacy_report)
         with self.assertRaises(ValueError):
             validate_paper_model(legacy, "SPY")
+
+    def test_paper_model_requires_matching_market_data_feed_provenance(self) -> None:
+        model = train_direction_model(self.bars, feed="sip")
+        model = replace(model, report=replace(model.report, validation_observations=100,
+                                             deployable_for_paper=True))
+        validate_paper_model(model, "SPY", feed="sip")
+        with self.assertRaises(ValueError):
+            validate_paper_model(model, "SPY", feed="iex")
+        legacy = replace(model, report=replace(model.report, training_feed=None))
+        with self.assertRaises(ValueError):
+            validate_paper_model(legacy, "SPY", feed="sip")
 
     def test_walk_forward_evaluation_is_causal_and_against_baseline(self) -> None:
         summary = walk_forward_evaluate(self.bars, training_bars=120, evaluation_bars=20, iterations=300)

@@ -141,7 +141,7 @@ def main() -> None:
     JsonlEventStore(ROOT / "runtime" / "quotes.jsonl").append_quotes([quote])
     model_path = args.model or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"
     model = LogisticDirectionModel.from_json(model_path)
-    validate_paper_model(model, args.symbol)
+    validate_paper_model(model, args.symbol, feed=args.feed)
     if args.submit_paper_order:
         if args.quality_report is None:
             raise ValueError("--quality-report is required with --submit-paper-order")

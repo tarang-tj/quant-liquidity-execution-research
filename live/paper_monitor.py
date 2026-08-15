@@ -47,10 +47,11 @@ def evaluate_read_only_once(
     max_training_gap_seconds: float | None = None,
     max_bar_gap_seconds: float | None = None,
     min_direction_edge: float = 0.0,
+    feed: str = "iex",
 ) -> dict[str, object]:
     """Fetch one fresh snapshot, score it, and append evidence without POSTing."""
     active_model = model or LogisticDirectionModel.from_json(model_path)
-    validate_paper_model(active_model, symbol)
+    validate_paper_model(active_model, symbol, feed=feed)
     if expected_model_hash is not None and file_sha256(model_path) != expected_model_hash:
         raise RuntimeError("model file changed during monitor; refusing to mix model versions")
     quote = data_client.latest_quote(symbol)
@@ -137,7 +138,7 @@ def run_monitor(
     # instead of labeling version A predictions as version B evidence.
     pinned_model_hash = file_sha256(model_path)
     model = LogisticDirectionModel.from_json(model_path)
-    validate_paper_model(model, symbol)
+    validate_paper_model(model, symbol, feed=feed)
     if file_sha256(model_path) != pinned_model_hash:
         raise RuntimeError("model file changed during monitor startup; refusing to mix model versions")
     samples: list[dict[str, object]] = []
@@ -158,6 +159,7 @@ def run_monitor(
             max_training_gap_seconds=max_training_gap_seconds,
             max_bar_gap_seconds=max_bar_gap_seconds,
             min_direction_edge=min_direction_edge,
+            feed=feed,
         ))
         if index + 1 < iterations and interval_seconds:
             sleep_fn(interval_seconds)

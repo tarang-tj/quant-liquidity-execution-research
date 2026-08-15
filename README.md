@@ -61,7 +61,9 @@ not the midpoint; order submission has no automatic retry path.
    in your shell environment (never commit them); see [`.env.example`](.env.example).
    Commands default to the IEX feed. Where your account is entitled to
    consolidated SIP data, pass `--feed sip` consistently to training,
-   walk-forward evaluation, preflight, monitoring, and paper evaluation.
+   walk-forward evaluation, preflight, monitoring, and paper evaluation. The
+   model JSON records its training feed, and runtime gates reject an IEX/SIP
+   mismatch (including legacy artifacts with no feed provenance).
 2. Train using historical bars. The command below fetches bars only when data
    credentials are present; `--input` supports an offline CSV with
    `timestamp,open,high,low,close,volume` for reproducible tests. A bundled
