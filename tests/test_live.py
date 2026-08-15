@@ -33,6 +33,7 @@ from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record
 from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
+from live.score_predictions import score_predictions
 from live.walk_forward import walk_forward_evaluate
 
 
@@ -118,6 +119,26 @@ class LiveBridgeTest(unittest.TestCase):
             direction_from_probability(0.5, 0.5)
         with self.assertRaises(ValueError):
             direction_from_probability(float("nan"), 0.05)
+
+    def test_live_prediction_scoring_requires_the_immediate_next_bar(self) -> None:
+        model = train_direction_model(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            model_path = Path(directory) / "model.json"
+            model.to_json(model_path)
+            decision = PaperDecision.create(
+                model_path=model_path, symbol="SPY", quote=self.quote,
+                bars=self.bars[:-1], features=live_features(self.bars[:-1]).tolist(),
+                probability=0.8, side="buy", risk_approved=False, risk_reason="test",
+                risk_source="test", broker_position=None, broker_daily_pnl=None,
+            )
+            scored = score_predictions([decision], self.bars)
+            self.assertEqual(scored["scored"], 1)
+            self.assertEqual(scored["directional_scored"], 1)
+            self.assertEqual(scored["pending"], 0)
+            self.assertAlmostEqual(float(scored["accuracy"]), 1.0)
+            pending = score_predictions([decision], self.bars[:-1])
+            self.assertEqual(pending["scored"], 0)
+            self.assertEqual(pending["pending"], 1)
 
     def test_model_rotation_is_atomic_and_preserves_previous_artifact_on_failure(self) -> None:
         model = train_direction_model(self.bars)
