@@ -92,7 +92,8 @@ when that budget is exhausted; order submission has no automatic retry path.
    submit anything by default:
 
    ```bash
-   python live/run_paper.py --symbol SPY --max-training-gap-hours 168
+   python live/run_paper.py --symbol SPY --max-training-gap-hours 168 \
+     --max-bar-gap-minutes 3
    ```
 
    Before the first evaluation, run the read-only readiness preflight. It reads
@@ -100,7 +101,8 @@ when that budget is exhausted; order submission has no automatic retry path.
    order:
 
    ```bash
-   python live/preflight.py --symbol SPY --max-training-gap-hours 168
+   python live/preflight.py --symbol SPY --max-training-gap-hours 168 \
+     --max-bar-gap-minutes 3
    ```
 
    For a finite staged paper observation window, use the read-only monitor. It
@@ -109,12 +111,15 @@ when that budget is exhausted; order submission has no automatic retry path.
 
    ```bash
    python live/paper_monitor.py --symbol SPY --iterations 30 --interval-seconds 60 \
-     --max-training-gap-hours 168
+     --max-training-gap-hours 168 --max-bar-gap-minutes 3
    ```
 
    The optional freshness SLA makes each path fail closed when the latest
    completed live bar is more than the specified number of hours after the
    model's recorded training end; omit it when replaying historical fixtures.
+   The bar-gap option similarly rejects a missing interval larger than the
+   configured number of minutes; choose it according to the symbol and feed's
+   expected liquidity rather than treating every no-trade minute as a failure.
 
 4. Only after reviewing the logs and model report may you explicitly add
    `--submit-paper-order`. This remains simulation, not production approval.

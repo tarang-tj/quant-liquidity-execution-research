@@ -268,6 +268,14 @@ class LiveBridgeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_model_data_alignment(model, self.bars, max_training_gap_seconds=float("nan"))
 
+    def test_model_data_alignment_rejects_excessive_live_bar_gap(self) -> None:
+        gapped = self.bars[:120]
+        gapped = gapped[:60] + [replace(bar, timestamp=bar.timestamp + timedelta(minutes=2))
+                                for bar in gapped[60:]]
+        model = train_direction_model(self.bars[:120])
+        with self.assertRaises(ValueError):
+            validate_model_data_alignment(model, gapped, max_bar_gap_seconds=60)
+
     def test_paper_model_requires_matching_complete_provenance(self) -> None:
         model = train_direction_model(self.bars)
         with self.assertRaises(ValueError):

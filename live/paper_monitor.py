@@ -45,6 +45,7 @@ def evaluate_read_only_once(
     model: LogisticDirectionModel | None = None,
     expected_model_hash: str | None = None,
     max_training_gap_seconds: float | None = None,
+    max_bar_gap_seconds: float | None = None,
 ) -> dict[str, object]:
     """Fetch one fresh snapshot, score it, and append evidence without POSTing."""
     active_model = model or LogisticDirectionModel.from_json(model_path)
@@ -53,7 +54,7 @@ def evaluate_read_only_once(
         raise RuntimeError("model file changed during monitor; refusing to mix model versions")
     quote = data_client.latest_quote(symbol)
     bars = data_client.bars(symbol, limit=history_bars)
-    validate_model_data_alignment(active_model, bars, max_training_gap_seconds)
+    validate_model_data_alignment(active_model, bars, max_training_gap_seconds, max_bar_gap_seconds)
     features = live_features(bars)
     probability = active_model.predict_probability(features)
     side = "buy" if probability >= 0.5 else "sell"
@@ -119,6 +120,7 @@ def run_monitor(
     sleep_fn: Callable[[float], None] = time.sleep,
     now_fn: Callable[[], datetime] | None = None,
     max_training_gap_seconds: float | None = None,
+    max_bar_gap_seconds: float | None = None,
 ) -> list[dict[str, object]]:
     """Run a finite paper monitor; unbounded daemon operation is not supported."""
     if not isinstance(iterations, int) or isinstance(iterations, bool) or not 1 <= iterations <= 10_000:
@@ -154,6 +156,7 @@ def run_monitor(
             model=model,
             expected_model_hash=pinned_model_hash,
             max_training_gap_seconds=max_training_gap_seconds,
+            max_bar_gap_seconds=max_bar_gap_seconds,
         ))
         if index + 1 < iterations and interval_seconds:
             sleep_fn(interval_seconds)
@@ -171,6 +174,8 @@ def main() -> None:
     parser.add_argument("--quantity", type=int, default=1)
     parser.add_argument("--max-training-gap-hours", type=float,
                         help="optional model freshness SLA; fail closed when exceeded")
+    parser.add_argument("--max-bar-gap-minutes", type=float,
+                        help="optional live-bar continuity SLA; fail closed when exceeded")
     parser.add_argument("--decision-log", type=Path)
     args = parser.parse_args()
     model_path = args.model or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"
@@ -184,6 +189,8 @@ def main() -> None:
         decision_log=PaperDecisionLog(args.decision_log) if args.decision_log else None,
         max_training_gap_seconds=(None if args.max_training_gap_hours is None
                                   else args.max_training_gap_hours * 3_600),
+        max_bar_gap_seconds=(None if args.max_bar_gap_minutes is None
+                             else args.max_bar_gap_minutes * 60),
     )
     for sample in samples:
         print(json.dumps(sample, sort_keys=True))

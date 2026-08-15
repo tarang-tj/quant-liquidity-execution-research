@@ -228,17 +228,23 @@ def validate_paper_model(model: LogisticDirectionModel, symbol: str, timeframe: 
 
 
 def validate_model_data_alignment(model: LogisticDirectionModel, bars: list[Bar],
-                                  max_training_gap_seconds: float | None = None) -> None:
-    """Reject a model trained after live data or beyond an optional freshness SLA."""
+                                  max_training_gap_seconds: float | None = None,
+                                  max_bar_gap_seconds: float | None = None) -> None:
+    """Reject future/stale models and optionally incomplete live bar sequences."""
     if not bars:
         raise ValueError("live bars are required for model-data alignment")
-    if max_training_gap_seconds is not None and (
-            isinstance(max_training_gap_seconds, bool) or not isinstance(max_training_gap_seconds, (int, float))
-            or not np.isfinite(max_training_gap_seconds) or max_training_gap_seconds < 0):
-        raise ValueError("max_training_gap_seconds must be a finite non-negative number")
+    for name, value in (("max_training_gap_seconds", max_training_gap_seconds),
+                        ("max_bar_gap_seconds", max_bar_gap_seconds)):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                  or not np.isfinite(value) or value < 0):
+            raise ValueError(f"{name} must be a finite non-negative number")
     timestamps = [bar.timestamp.astimezone(timezone.utc) for bar in bars]
     if any(left >= right for left, right in zip(timestamps, timestamps[1:])):
         raise ValueError("live bars must be strictly chronological")
+    if (max_bar_gap_seconds is not None and
+            any((right - left).total_seconds() > float(max_bar_gap_seconds)
+                for left, right in zip(timestamps, timestamps[1:]))):
+        raise ValueError("live bars exceed the configured maximum timestamp gap")
     if model.report.training_end is None:
         raise ValueError("model lacks training_end provenance")
     training_end = datetime.fromisoformat(model.report.training_end.replace("Z", "+00:00"))
