@@ -85,6 +85,17 @@ not the midpoint; order submission has no automatic retry path.
    python live/promote_model.py --symbol SPY --bars 1000 --target models/SPY_logistic.json
    ```
 
+   For a bounded recurring job, use the auditable retraining runner. Each cycle
+   fetches a fresh window, records its feed and promotion checks to JSONL, and
+   preserves the last good model when a candidate is rejected; it never submits
+   orders:
+
+   ```bash
+   python live/retrain_model.py --symbol SPY --iterations 24 \
+     --interval-seconds 3600 --report runtime/SPY_promotions.jsonl \
+     --target models/SPY_logistic.json
+   ```
+
    Before considering a model for paper use, run a causal walk-forward check.
    Each block is fit only on bars strictly before that block; the result also
    reports a majority-class baseline, gross/net return in basis points,

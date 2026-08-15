@@ -51,6 +51,16 @@ python live/promote_model.py --symbol SPY --bars 1000 \
   --target models/SPY_logistic.json
 ```
 
+For scheduled paper evaluation, the bounded retraining runner repeats this
+workflow without ever submitting an order. It writes one durable promotion
+report per cycle and exits after the requested count:
+
+```bash
+python live/retrain_model.py --symbol SPY --iterations 24 \
+  --interval-seconds 3600 --report runtime/SPY_promotions.jsonl \
+  --target models/SPY_logistic.json
+```
+
 Promotion is atomic and leaves the existing active model untouched when the
 candidate fails. Record the evaluation output, model hash, feed, bar window,
 and thresholds with the release.
