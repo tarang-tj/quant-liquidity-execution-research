@@ -151,3 +151,6 @@ when it is exhausted. A production system also needs entitlement-appropriate
 consolidated data, replay/gap recovery, corporate-action adjustments, backtests with real
 transaction costs, independent model/risk approval, monitoring, and a long
 paper-trading record before live capital is considered.
+
+See [`OPERATIONS.md`](OPERATIONS.md) for the staged operator runbook and the
+explicit requirements that remain before any live-capital design.
