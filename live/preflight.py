@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date, timedelta
 import json
 from pathlib import Path
 import sys
@@ -70,6 +71,9 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
         checks.append(_result("market_clock", True,
                               "paper market is open" if market_open else
                               "paper market is closed; no submission should be attempted"))
+        sessions = paper_broker.trading_calendar(date.today(), date.today() + timedelta(days=7))
+        checks.append(_result("trading_calendar", True,
+                              f"validated {len(sessions)} exchange sessions for the next 7 days"))
     except Exception as exc:
         checks.append(_result("paper_broker", False, f"read-only paper-broker check failed: {type(exc).__name__}"))
 

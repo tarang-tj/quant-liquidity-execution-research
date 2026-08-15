@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from datetime import date
 from math import isfinite
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -107,6 +108,32 @@ class AlpacaPaperBroker:
         if not isinstance(clock, dict) or not isinstance(clock.get("is_open"), bool):
             raise MarketDataError("paper market-clock response lacks a boolean is_open field")
         return clock["is_open"]
+
+    def trading_calendar(self, start: date, end: date) -> list[dict[str, object]]:
+        """Return validated exchange sessions, including early-close times."""
+        if not isinstance(start, date) or not isinstance(end, date) or end < start:
+            raise ValueError("calendar range must contain ordered dates")
+        if (end - start).days > 31:
+            raise ValueError("calendar range cannot exceed 31 days")
+        payload = self._get_json("/v2/calendar?" + urlencode({
+            "start": start.isoformat(), "end": end.isoformat(),
+        }))
+        if not isinstance(payload, list):
+            raise MarketDataError("paper calendar response must be an array")
+        sessions: list[dict[str, object]] = []
+        for session in payload:
+            if not isinstance(session, dict):
+                raise MarketDataError("paper calendar response contains a non-object session")
+            try:
+                session_date = date.fromisoformat(str(session["date"]))
+                open_time = str(session["open"])
+                close_time = str(session["close"])
+                if not open_time or not close_time or not start <= session_date <= end:
+                    raise ValueError("invalid session range or times")
+            except (KeyError, TypeError, ValueError) as exc:
+                raise MarketDataError("paper calendar session is malformed") from exc
+            sessions.append({"date": session_date.isoformat(), "open": open_time, "close": close_time})
+        return sessions
 
     def submit_market_order(self, intent: OrderIntent, client_order_id: str) -> dict[str, object]:
         if not client_order_id or len(client_order_id) > 48:

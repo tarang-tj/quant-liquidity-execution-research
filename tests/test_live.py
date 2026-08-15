@@ -207,6 +207,7 @@ class LiveBridgeTest(unittest.TestCase):
             broker = unittest.mock.Mock()
             broker.risk_state.return_value = PaperRiskState(0, 0, 0, 0, 1_000)
             broker.market_clock.return_value = True
+            broker.trading_calendar.return_value = []
             health = run_health("SPY", model_path, report_path, log_path,
                                 data_client=data_client, broker=broker)
             self.assertTrue(health["ready_for_paper_session"])
@@ -256,6 +257,7 @@ class LiveBridgeTest(unittest.TestCase):
             broker = unittest.mock.Mock()
             broker.risk_state.return_value = PaperRiskState(1, -2, 3, 4, 1000)
             broker.market_clock.return_value = True
+            broker.trading_calendar.return_value = [{"date": "2026-01-02", "open": "09:30", "close": "16:00"}]
             report = run_preflight("SPY", model_path, data_client=data_client, broker=broker)
         self.assertTrue(report["ready_for_paper_evaluation"])
         self.assertTrue(report["paper_only"])
@@ -264,6 +266,7 @@ class LiveBridgeTest(unittest.TestCase):
         data_client.bars.assert_called_once_with("SPY", limit=100)
         broker.risk_state.assert_called_once_with("SPY")
         broker.market_clock.assert_called_once_with()
+        broker.trading_calendar.assert_called_once()
         self.assertFalse(hasattr(broker, "submit_market_order") and broker.submit_market_order.called)
 
     def test_finite_read_only_monitor_records_each_sample_without_submission(self) -> None:
@@ -623,6 +626,20 @@ class LiveBridgeTest(unittest.TestCase):
         with patch.object(broker, "_get_json", return_value={"is_open": "true"}):
             with self.assertRaises(MarketDataError):
                 broker.market_clock()
+
+    def test_paper_trading_calendar_validates_sessions_and_range(self) -> None:
+        broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
+        with patch.object(broker, "_get_json", return_value=[
+            {"date": "2026-01-02", "open": "09:30", "close": "16:00"},
+        ]) as get_json:
+            sessions = broker.trading_calendar(datetime(2026, 1, 1).date(), datetime(2026, 1, 3).date())
+        self.assertEqual(sessions[0]["date"], "2026-01-02")
+        self.assertIn("start=2026-01-01", get_json.call_args.args[0])
+        with self.assertRaises(ValueError):
+            broker.trading_calendar(datetime(2026, 1, 3).date(), datetime(2026, 1, 1).date())
+        with patch.object(broker, "_get_json", return_value=[{"date": "bad", "open": "", "close": ""}]):
+            with self.assertRaises(MarketDataError):
+                broker.trading_calendar(datetime(2026, 1, 1).date(), datetime(2026, 1, 3).date())
 
     def test_reconciliation_uses_fixed_paper_endpoint(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")

@@ -113,8 +113,8 @@ not the midpoint; order submission has no automatic retry path.
    ```
 
    Before the first evaluation, run the read-only readiness preflight. It reads
-   the model, live data, paper account/risk/buying-power snapshot, and broker market clock
-   but never creates an order:
+   the model, live data, paper account/risk/buying-power snapshot, broker market clock,
+   and the validated exchange trading calendar (including early closes), but never creates an order:
 
    ```bash
    python live/preflight.py --symbol SPY --max-training-gap-hours 168 \
@@ -132,7 +132,7 @@ not the midpoint; order submission has no automatic retry path.
    ```
 
    It exits nonzero unless model provenance, live data, broker state, market
-   clock, quality evidence, and the local decision hash chain all pass. It
+   clock/calendar, quality evidence, and the local decision hash chain all pass. It
    never creates an order.
 
    For a finite staged paper observation window, use the read-only monitor. It
