@@ -28,7 +28,8 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
                   data_client: AlpacaMarketDataClient | None = None,
                   broker: AlpacaPaperBroker | None = None,
                   max_training_gap_seconds: float | None = None,
-                  max_bar_gap_seconds: float | None = None) -> dict[str, object]:
+                  max_bar_gap_seconds: float | None = None,
+                  feed: str = "iex") -> dict[str, object]:
     """Verify read-only prerequisites for paper execution without any order path."""
     checks: list[dict[str, object]] = []
     model: LogisticDirectionModel | None = None
@@ -40,7 +41,7 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
         checks.append(_result("model", False, f"model unavailable or invalid: {type(exc).__name__}"))
 
     try:
-        client = data_client or AlpacaMarketDataClient()
+        client = data_client or AlpacaMarketDataClient(feed=feed)
         quote = client.latest_quote(symbol)
         bars = client.bars(symbol, limit=history_bars)
         if len(bars) < 21:
@@ -89,8 +90,8 @@ def main() -> None:
     gap_seconds = None if args.max_training_gap_hours is None else args.max_training_gap_hours * 3_600
     bar_gap_seconds = None if args.max_bar_gap_minutes is None else args.max_bar_gap_minutes * 60
     report = run_preflight(args.symbol, model_path, args.history_bars,
-                           data_client=AlpacaMarketDataClient(feed=args.feed),
-                           max_training_gap_seconds=gap_seconds, max_bar_gap_seconds=bar_gap_seconds)
+                           feed=args.feed, max_training_gap_seconds=gap_seconds,
+                           max_bar_gap_seconds=bar_gap_seconds)
     print(json.dumps(report, sort_keys=True))
     if not report["ready_for_paper_evaluation"]:
         raise SystemExit(1)
