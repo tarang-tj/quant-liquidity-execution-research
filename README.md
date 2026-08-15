@@ -144,17 +144,21 @@ not the midpoint; order submission has no automatic retry path.
    ```bash
    python live/score_predictions.py --symbol SPY \
      --decision-log runtime/paper_monitor_decisions.jsonl --bars 1000 \
-     --minimum-scored 20 --minimum-accuracy 0.52 --maximum-brier 0.25
+     --minimum-scored 20 --minimum-accuracy 0.52 --maximum-brier 0.25 \
+     --output runtime/SPY_quality.json
    ```
 
    The scorer requires the immediate next one-minute bar, reports directional
    accuracy, Brier score, coverage, realized directional return, and leaves
    gaps pending rather than inventing labels. Its quality gate exits nonzero
    until enough scored observations exist and the configured accuracy/Brier
-   thresholds pass.
+   thresholds pass. The optional output is atomically written and pinned to a
+   single model hash; paper submission rejects missing, stale, mixed-model, or
+   failed reports.
 
 4. Only after reviewing the logs and model report may you explicitly add
-   `--submit-paper-order`. This remains simulation, not production approval.
+   `--submit-paper-order --quality-report runtime/SPY_quality.json`. This remains
+   simulation, not production approval.
 
 Every evaluation records its model hash, completed bars, quote, features, risk
 decision, and (only when requested) paper-account state in
