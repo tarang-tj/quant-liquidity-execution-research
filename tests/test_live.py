@@ -371,6 +371,15 @@ class LiveBridgeTest(unittest.TestCase):
         self.assertFalse(invalid.approved)
         self.assertEqual(invalid.reason, "buying power is invalid")
 
+    def test_risk_notional_uses_executable_side_not_midpoint(self) -> None:
+        quote = Quote("SPY", 99.0, 101.0, 100, 100, self.now, "fixture")
+        limits = RiskLimits(max_order_notional=100.0, max_spread_bps=300.0)
+        rejected = validate_paper_order(OrderIntent("SPY", "buy", 1), quote, 0, 0, limits, self.now)
+        self.assertFalse(rejected.approved)
+        self.assertEqual(rejected.reason, "order notional limit exceeded")
+        accepted = validate_paper_order(OrderIntent("SPY", "sell", 1), quote, 0, 0, limits, self.now)
+        self.assertTrue(accepted.approved)
+
     def test_quote_schema_normalizes_provider_fields(self) -> None:
         quote = Quote.from_alpaca({"S": "SPY", "bp": 100.0, "ap": 100.02, "bs": 10, "as": 12,
                                    "t": "2026-01-02T14:30:00Z"})

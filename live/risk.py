@@ -103,8 +103,12 @@ def validate_paper_order(intent: OrderIntent, quote: Quote, current_position: fl
                                   abs(position_after_new_order - pending_sell_quantity))
     if worst_reserved_position > limits.max_position_shares:
         return RiskDecision(False, "position limit exceeded including open-order reservations")
-    if intent.quantity * quote.mid_price > limits.max_order_notional:
+    execution_price = quote.ask_price if intent.side == "buy" else quote.bid_price
+    if not isfinite(execution_price) or execution_price <= 0:
+        return RiskDecision(False, "quote execution price is invalid")
+    order_notional = intent.quantity * execution_price
+    if order_notional > limits.max_order_notional:
         return RiskDecision(False, "order notional limit exceeded")
-    if buying_power is not None and intent.quantity * quote.mid_price > buying_power:
+    if buying_power is not None and order_notional > buying_power:
         return RiskDecision(False, "order exceeds broker buying power")
     return RiskDecision(True, "paper order passed all risk gates")
