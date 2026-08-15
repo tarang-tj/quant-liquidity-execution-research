@@ -64,6 +64,14 @@ predictions use only completed minute bars, never the in-progress bar.
    python live/run_paper.py --symbol SPY
    ```
 
+   Before the first evaluation, run the read-only readiness preflight. It reads
+   the model, live data, and paper account/risk snapshot but never creates an
+   order:
+
+   ```bash
+   python live/preflight.py --symbol SPY
+   ```
+
 4. Only after reviewing the logs and model report may you explicitly add
    `--submit-paper-order`. This remains simulation, not production approval.
 

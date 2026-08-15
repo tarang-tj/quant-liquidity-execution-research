@@ -19,6 +19,7 @@ from live.market_data import AlpacaMarketDataClient, Bar, MarketDataError, Quote
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker, PaperRiskState
 from live.predictor import LogisticDirectionModel, causal_training_matrix, live_features, train_direction_model
+from live.preflight import run_preflight
 from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record
@@ -71,6 +72,26 @@ class LiveBridgeTest(unittest.TestCase):
             model.to_json(path)
             restored = LogisticDirectionModel.from_json(path)
             self.assertAlmostEqual(model.predict_probability(x[-1]), restored.predict_probability(x[-1]))
+
+    def test_read_only_preflight_checks_data_model_and_paper_broker(self) -> None:
+        model = train_direction_model(self.bars)
+        deployable = replace(model, report=replace(model.report, deployable_for_paper=True))
+        with tempfile.TemporaryDirectory() as directory:
+            model_path = Path(directory) / "model.json"
+            deployable.to_json(model_path)
+            data_client = unittest.mock.Mock()
+            data_client.latest_quote.return_value = self.quote
+            data_client.bars.return_value = self.bars[-100:]
+            broker = unittest.mock.Mock()
+            broker.risk_state.return_value = PaperRiskState(1, -2, 3, 4)
+            report = run_preflight("SPY", model_path, data_client=data_client, broker=broker)
+        self.assertTrue(report["ready_for_paper_evaluation"])
+        self.assertTrue(report["paper_only"])
+        self.assertFalse(report["order_submission_attempted"])
+        data_client.latest_quote.assert_called_once_with("SPY")
+        data_client.bars.assert_called_once_with("SPY", limit=100)
+        broker.risk_state.assert_called_once_with("SPY")
+        self.assertFalse(hasattr(broker, "submit_market_order") and broker.submit_market_order.called)
 
     def test_future_bar_does_not_change_earlier_features(self) -> None:
         baseline, _ = causal_training_matrix(self.bars)
