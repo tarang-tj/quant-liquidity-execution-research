@@ -138,6 +138,18 @@ not the midpoint; order submission has no automatic retry path.
    configured number of minutes; choose it according to the symbol and feed's
    expected liquidity rather than treating every no-trade minute as a failure.
 
+   After a subsequent completed bar is available, score the journaled live
+   predictions without changing the journal or submitting anything:
+
+   ```bash
+   python live/score_predictions.py --symbol SPY \
+     --decision-log runtime/paper_monitor_decisions.jsonl --bars 1000
+   ```
+
+   The scorer requires the immediate next one-minute bar, reports directional
+   accuracy, Brier score, coverage, realized directional return, and leaves
+   gaps pending rather than inventing labels.
+
 4. Only after reviewing the logs and model report may you explicitly add
    `--submit-paper-order`. This remains simulation, not production approval.
 

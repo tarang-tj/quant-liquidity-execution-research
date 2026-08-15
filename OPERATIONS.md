@@ -72,6 +72,15 @@ ever has an unknown network outcome, do not retry; reconcile by client order ID:
 python live/reconcile_paper.py --client-order-id <id>
 ```
 
+Once later completed bars exist, calculate realized monitor quality with the
+read-only scorer. It labels only the immediate next bar and reports pending
+records when the bar is not yet available:
+
+```bash
+python live/score_predictions.py --symbol SPY \
+  --decision-log runtime/paper_monitor_decisions.jsonl --bars 1000
+```
+
 ## Stage 4: explicitly authorized paper submission
 
 Only after the preceding evidence is reviewed may an operator use
