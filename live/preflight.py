@@ -66,6 +66,10 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
                               "paper account, position, and open-order reservation snapshot received "
                               f"(position={state.current_position}, pending_buy={state.pending_buy_quantity}, "
                               f"pending_sell={state.pending_sell_quantity})"))
+        market_open = paper_broker.market_clock()
+        checks.append(_result("market_clock", True,
+                              "paper market is open" if market_open else
+                              "paper market is closed; no submission should be attempted"))
     except Exception as exc:
         checks.append(_result("paper_broker", False, f"read-only paper-broker check failed: {type(exc).__name__}"))
 

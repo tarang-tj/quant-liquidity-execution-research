@@ -146,6 +146,7 @@ class LiveBridgeTest(unittest.TestCase):
             data_client.bars.return_value = self.bars[-100:]
             broker = unittest.mock.Mock()
             broker.risk_state.return_value = PaperRiskState(1, -2, 3, 4)
+            broker.market_clock.return_value = True
             report = run_preflight("SPY", model_path, data_client=data_client, broker=broker)
         self.assertTrue(report["ready_for_paper_evaluation"])
         self.assertTrue(report["paper_only"])
@@ -153,6 +154,7 @@ class LiveBridgeTest(unittest.TestCase):
         data_client.latest_quote.assert_called_once_with("SPY")
         data_client.bars.assert_called_once_with("SPY", limit=100)
         broker.risk_state.assert_called_once_with("SPY")
+        broker.market_clock.assert_called_once_with()
         self.assertFalse(hasattr(broker, "submit_market_order") and broker.submit_market_order.called)
 
     def test_finite_read_only_monitor_records_each_sample_without_submission(self) -> None:

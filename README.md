@@ -102,8 +102,8 @@ session state; order submission has no automatic retry path.
    ```
 
    Before the first evaluation, run the read-only readiness preflight. It reads
-   the model, live data, and paper account/risk snapshot but never creates an
-   order:
+   the model, live data, paper account/risk snapshot, and broker market clock
+   but never creates an order:
 
    ```bash
    python live/preflight.py --symbol SPY --max-training-gap-hours 168 \
