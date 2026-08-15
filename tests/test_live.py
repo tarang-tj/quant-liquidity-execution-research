@@ -20,6 +20,7 @@ from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker, PaperRiskState
 from live.predictor import LogisticDirectionModel, causal_training_matrix, live_features, train_direction_model
 from live.preflight import run_preflight
+from live.paper_monitor import run_monitor
 from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record
@@ -92,6 +93,38 @@ class LiveBridgeTest(unittest.TestCase):
         data_client.bars.assert_called_once_with("SPY", limit=100)
         broker.risk_state.assert_called_once_with("SPY")
         self.assertFalse(hasattr(broker, "submit_market_order") and broker.submit_market_order.called)
+
+    def test_finite_read_only_monitor_records_each_sample_without_submission(self) -> None:
+        model = train_direction_model(self.bars)
+        deployable = replace(model, report=replace(model.report, deployable_for_paper=True))
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, log_path = folder / "model.json", folder / "monitor.jsonl"
+            deployable.to_json(model_path)
+            data_client = unittest.mock.Mock()
+            data_client.latest_quote.side_effect = [self.quote, self.quote]
+            data_client.bars.side_effect = [self.bars[-100:], self.bars[-100:]]
+            broker = unittest.mock.Mock()
+            broker.risk_state.side_effect = [PaperRiskState(0, 0, 0, 0), PaperRiskState(1, -2, 0, 0)]
+            sleeps: list[float] = []
+            samples = run_monitor(
+                "SPY", model_path, iterations=2, interval_seconds=3,
+                data_client=data_client, broker=broker,
+                decision_log=PaperDecisionLog(log_path), sleep_fn=sleeps.append,
+                now_fn=lambda: self.now,
+            )
+            self.assertEqual(len(samples), 2)
+            self.assertEqual(sleeps, [3])
+            self.assertTrue(all(sample["paper_only"] and not sample["submitted"] for sample in samples))
+            self.assertEqual(len(PaperDecisionLog(log_path).read()), 2)
+            self.assertEqual(data_client.latest_quote.call_count, 2)
+            self.assertEqual(broker.risk_state.call_count, 2)
+            self.assertFalse(hasattr(broker, "submit_market_order") and broker.submit_market_order.called)
+
+    def test_monitor_rejects_nonfinite_interval(self) -> None:
+        with self.assertRaises(ValueError):
+            run_monitor("SPY", Path("missing-model.json"), iterations=1, interval_seconds=float("nan"),
+                        data_client=unittest.mock.Mock(), broker=unittest.mock.Mock())
 
     def test_future_bar_does_not_change_earlier_features(self) -> None:
         baseline, _ = causal_training_matrix(self.bars)

@@ -72,6 +72,14 @@ predictions use only completed minute bars, never the in-progress bar.
    python live/preflight.py --symbol SPY
    ```
 
+   For a finite staged paper observation window, use the read-only monitor. It
+   refreshes completed bars and the paper risk snapshot for each iteration,
+   appends each prediction to a durable journal, and never submits an order:
+
+   ```bash
+   python live/paper_monitor.py --symbol SPY --iterations 30 --interval-seconds 60
+   ```
+
 4. Only after reviewing the logs and model report may you explicitly add
    `--submit-paper-order`. This remains simulation, not production approval.
 
