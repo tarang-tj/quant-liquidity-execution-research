@@ -17,9 +17,10 @@ if __package__ in {None, ""}:
 from live.market_data import AlpacaMarketDataClient, JsonlEventStore
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker
-from live.predictor import (LogisticDirectionModel, live_features, validate_model_data_alignment,
+from live.predictor import (LogisticDirectionModel, direction_from_probability, live_features,
+                            validate_model_data_alignment,
                             validate_paper_model)
-from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
+from live.risk import OrderIntent, PaperSubmissionLease, RiskDecision, RiskLimits, validate_paper_order
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +93,8 @@ def main() -> None:
                         help="optional model freshness SLA; fail closed when exceeded")
     parser.add_argument("--max-bar-gap-minutes", type=float,
                         help="optional live-bar continuity SLA; fail closed when exceeded")
+    parser.add_argument("--min-direction-edge", type=float, default=0.0,
+                        help="abstain (hold) unless probability is this far from 0.5; default 0")
     parser.add_argument("--quantity", type=int, default=1)
     parser.add_argument("--submit-paper-order", action="store_true", help="explicitly submit a qualifying paper order")
     args = parser.parse_args()
@@ -107,22 +110,26 @@ def main() -> None:
     validate_model_data_alignment(model, bars, gap_seconds, bar_gap_seconds)
     features = live_features(bars)
     probability = model.predict_probability(features)
-    side = "buy" if probability >= .5 else "sell"
+    side = direction_from_probability(probability, args.min_direction_edge)
     intent = OrderIntent(args.symbol.upper(), side, args.quantity)
     broker = AlpacaPaperBroker() if args.submit_paper_order else None
     lease = PaperSubmissionLease(ROOT / "runtime" / "paper_submission.lock") if broker else nullcontext()
     with lease:
         if broker is None:
-            decision = validate_paper_order(intent, quote, 0, 0.0, RiskLimits())
+            decision = (RiskDecision(False, "predictive signal abstained: below minimum direction edge")
+                        if side == "hold" else
+                        validate_paper_order(intent, quote, 0, 0.0, RiskLimits()))
             risk_source = "preview only; no broker account read"
             broker_position = broker_daily_pnl = broker_pending_buy_quantity = broker_pending_sell_quantity = None
         else:
             state = broker.risk_state(intent.symbol)
             market_open = broker.market_clock()
-            decision = validate_paper_order(intent, quote, state.current_position, state.daily_pnl, RiskLimits(),
-                                            pending_buy_quantity=state.pending_buy_quantity,
-                                            pending_sell_quantity=state.pending_sell_quantity,
-                                            market_open=market_open, buying_power=state.buying_power)
+            decision = (RiskDecision(False, "predictive signal abstained: below minimum direction edge")
+                        if side == "hold" else
+                        validate_paper_order(intent, quote, state.current_position, state.daily_pnl, RiskLimits(),
+                                             pending_buy_quantity=state.pending_buy_quantity,
+                                             pending_sell_quantity=state.pending_sell_quantity,
+                                             market_open=market_open, buying_power=state.buying_power))
             risk_source = "Alpaca paper account, position, open orders, buying power, and market clock"
             broker_position, broker_daily_pnl = state.current_position, state.daily_pnl
             broker_pending_buy_quantity, broker_pending_sell_quantity = (

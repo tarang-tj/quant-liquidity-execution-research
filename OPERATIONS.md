@@ -61,7 +61,7 @@ Run a bounded read-only monitor before enabling any order submission:
 ```bash
 python live/paper_monitor.py --symbol SPY --iterations 30 \
   --interval-seconds 60 --max-training-gap-hours 168 \
-  --max-bar-gap-minutes 3
+  --max-bar-gap-minutes 3 --min-direction-edge 0.05
 ```
 
 Review prediction quality, quote freshness, spread, exposure reservations,

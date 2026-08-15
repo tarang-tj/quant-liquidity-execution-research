@@ -9,10 +9,30 @@ import json
 import hashlib
 import tempfile
 from datetime import datetime, timezone
+from math import isfinite
 
 import numpy as np
 
 from live.market_data import Bar
+
+
+def direction_from_probability(probability: float, min_edge: float = 0.0) -> str:
+    """Map a calibrated up-probability to a side, or abstain when uncertain.
+
+    ``min_edge`` is the minimum absolute distance from 0.5 required to take a
+    directional action.  A zero default preserves the historical threshold
+    policy, while a positive value makes weak predictions explicit ``hold``
+    decisions that can be journaled and evaluated without submitting orders.
+    """
+    if not isfinite(probability) or not 0.0 <= probability <= 1.0:
+        raise ValueError("probability must be a finite value between 0 and 1")
+    if not isfinite(min_edge) or not 0.0 <= min_edge < 0.5:
+        raise ValueError("min_edge must be finite and in [0, 0.5)")
+    # The epsilon makes decimal boundaries such as 0.55 with edge 0.05
+    # deterministic despite binary floating-point representation.
+    if min_edge > 0.0 and abs(probability - 0.5) <= min_edge + 1e-12:
+        return "hold"
+    return "buy" if probability >= 0.5 else "sell"
 
 
 @dataclass(frozen=True, slots=True)

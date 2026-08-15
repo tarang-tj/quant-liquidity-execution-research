@@ -25,8 +25,8 @@ from live.audit import PaperDecision, PaperDecisionLog, file_sha256
 from live.market_data import AlpacaMarketDataClient
 from live.paper_broker import AlpacaPaperBroker
 from live.predictor import (LogisticDirectionModel, live_features, validate_model_data_alignment,
-                            validate_paper_model)
-from live.risk import OrderIntent, RiskLimits, validate_paper_order
+                            direction_from_probability, validate_paper_model)
+from live.risk import OrderIntent, RiskDecision, RiskLimits, validate_paper_order
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +46,7 @@ def evaluate_read_only_once(
     expected_model_hash: str | None = None,
     max_training_gap_seconds: float | None = None,
     max_bar_gap_seconds: float | None = None,
+    min_direction_edge: float = 0.0,
 ) -> dict[str, object]:
     """Fetch one fresh snapshot, score it, and append evidence without POSTing."""
     active_model = model or LogisticDirectionModel.from_json(model_path)
@@ -57,20 +58,17 @@ def evaluate_read_only_once(
     validate_model_data_alignment(active_model, bars, max_training_gap_seconds, max_bar_gap_seconds)
     features = live_features(bars)
     probability = active_model.predict_probability(features)
-    side = "buy" if probability >= 0.5 else "sell"
+    side = direction_from_probability(probability, min_direction_edge)
     intent = OrderIntent(symbol.upper(), side, quantity)
     state = broker.risk_state(intent.symbol)
     now = now_fn() if now_fn is not None else None
-    decision = validate_paper_order(
-        intent,
-        quote,
-        state.current_position,
-        state.daily_pnl,
-        RiskLimits(),
-        now=now,  # type: ignore[arg-type]
-        pending_buy_quantity=state.pending_buy_quantity,
-        pending_sell_quantity=state.pending_sell_quantity,
-    )
+    decision = (RiskDecision(False, "predictive signal abstained: below minimum direction edge")
+                if side == "hold" else validate_paper_order(
+                    intent, quote, state.current_position, state.daily_pnl, RiskLimits(),
+                    now=now,  # type: ignore[arg-type]
+                    pending_buy_quantity=state.pending_buy_quantity,
+                    pending_sell_quantity=state.pending_sell_quantity,
+                ))
     if expected_model_hash is not None and file_sha256(model_path) != expected_model_hash:
         raise RuntimeError("model file changed during monitor; refusing to journal mixed model evidence")
     audit = PaperDecision.create(
@@ -121,6 +119,7 @@ def run_monitor(
     now_fn: Callable[[], datetime] | None = None,
     max_training_gap_seconds: float | None = None,
     max_bar_gap_seconds: float | None = None,
+    min_direction_edge: float = 0.0,
     feed: str = "iex",
 ) -> list[dict[str, object]]:
     """Run a finite paper monitor; unbounded daemon operation is not supported."""
@@ -158,6 +157,7 @@ def run_monitor(
             expected_model_hash=pinned_model_hash,
             max_training_gap_seconds=max_training_gap_seconds,
             max_bar_gap_seconds=max_bar_gap_seconds,
+            min_direction_edge=min_direction_edge,
         ))
         if index + 1 < iterations and interval_seconds:
             sleep_fn(interval_seconds)
@@ -179,6 +179,8 @@ def main() -> None:
                         help="optional model freshness SLA; fail closed when exceeded")
     parser.add_argument("--max-bar-gap-minutes", type=float,
                         help="optional live-bar continuity SLA; fail closed when exceeded")
+    parser.add_argument("--min-direction-edge", type=float, default=0.0,
+                        help="abstain (hold) unless probability is this far from 0.5; default 0")
     parser.add_argument("--decision-log", type=Path)
     args = parser.parse_args()
     model_path = args.model or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"
@@ -194,6 +196,7 @@ def main() -> None:
                                   else args.max_training_gap_hours * 3_600),
         max_bar_gap_seconds=(None if args.max_bar_gap_minutes is None
                              else args.max_bar_gap_minutes * 60),
+        min_direction_edge=args.min_direction_edge,
         feed=args.feed,
     )
     for sample in samples:
