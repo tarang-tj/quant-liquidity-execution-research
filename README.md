@@ -48,7 +48,9 @@ fixed Alpaca paper account before position, so a fill between reads is
 over-reserved rather than undercounted; unavailable or malformed broker state
 fails closed rather than trusting command-line inputs. A non-blocking local
 process lease covers the check-to-submit window. This bridge is deliberately a
-single-host paper runner, not a multi-host/HA execution service. Live
+single-host paper runner, not a multi-host/HA execution service. Paper submission
+also requires a short-lived HMAC approval artifact issued independently of the execution process
+and bound to the exact model hash, quote timestamp, side, quantity, and client order ID. Live
 predictions use only completed minute bars, never the in-progress bar, and the
 decision path rejects model artifacts whose training window extends into the
 future relative to the live bars. Market-data REST snapshots use a small,
@@ -116,6 +118,20 @@ not the midpoint; order submission has no automatic retry path.
    ```bash
    python live/run_paper.py --symbol SPY --max-training-gap-hours 168 \
      --max-bar-gap-minutes 3
+   ```
+
+   A qualifying paper order requires a fresh quality report and an independent approval. Keep
+   `TRADING_RISK_APPROVAL_KEY` outside the repository and share it only with the separate approval
+   issuer and paper runner. Issue one approval for one exact order, then pass the same client ID:
+
+   ```bash
+   python live/issue_risk_approval.py --approve --client-order-id research-example \
+     --symbol SPY --side buy --quantity 1 --model-sha256 <model-sha256> \
+     --quote-timestamp <quote-timestamp> --reason "independent risk review" \
+     --output runtime/SPY.approval.json
+   python live/run_paper.py --symbol SPY --submit-paper-order \
+     --quality-report runtime/SPY_quality.json --risk-approval runtime/SPY.approval.json \
+     --client-order-id research-example
    ```
 
    To avoid forcing a trade when the directional model is nearly indifferent,

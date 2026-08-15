@@ -116,6 +116,11 @@ The output report is atomically written and pinned to one model hash. Paper
 submission rejects a missing, stale, mixed-model, symbol-mismatched, or failed
 report.
 
+Paper submission additionally requires a short-lived HMAC approval created by a separate
+operator/process. The artifact is bound to the exact model hash, completed-quote timestamp,
+side, quantity, and client order ID; the executor rejects tampering, mismatches, and expiry.
+Keep `TRADING_RISK_APPROVAL_KEY` outside Git and issue one approval per proposed order.
+
 Use the combined read-only health snapshot as the machine-checkable session
 gate. It verifies the model, live data, broker state, market clock/calendar, fresh
 quality report, and decision-journal integrity without submitting:
