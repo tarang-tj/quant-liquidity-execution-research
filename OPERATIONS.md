@@ -47,8 +47,9 @@ python live/stream_quotes.py --symbols SPY --max-quotes 100 \
 ```
 
 The collector exits after its finite quote/time budget, fsyncs each JSONL event,
-and reports whether the stream exhausted or timed out. An empty sample is a
-failure; it is not evidence that the feed is healthy.
+rejects unrequested symbols or backwards timestamps, and reports duplicate and
+inter-quote gap metrics. An empty sample is a failure; it is not evidence that
+the feed is healthy.
 
 ## Stage 2: causal evaluation and promotion
 

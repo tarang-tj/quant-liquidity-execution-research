@@ -19,7 +19,7 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from live.market_data import AlpacaMarketDataClient, JsonlEventStore, Quote
+from live.market_data import AlpacaMarketDataClient, JsonlEventStore, MarketDataError, Quote
 
 
 async def collect_quotes(
@@ -53,6 +53,9 @@ async def collect_quotes(
     stream = client.stream_quotes(normalized_symbols, max_reconnects=max_reconnects)
     iterator = stream.__aiter__()
     collected: list[Quote] = []
+    latest_by_symbol: dict[str, datetime] = {}
+    duplicate_timestamps = 0
+    largest_gap_seconds = 0.0
     deadline = asyncio.get_running_loop().time() + float(timeout_seconds)
     timed_out = False
     try:
@@ -70,6 +73,17 @@ async def collect_quotes(
                 break
             if not isinstance(quote, Quote):
                 raise TypeError("quote stream yielded a non-Quote value")
+            if quote.symbol.upper() not in normalized_symbols:
+                raise MarketDataError("quote stream yielded a symbol that was not requested")
+            previous = latest_by_symbol.get(quote.symbol.upper())
+            if previous is not None:
+                gap_seconds = (quote.timestamp - previous).total_seconds()
+                if gap_seconds < 0:
+                    raise MarketDataError("quote stream timestamp moved backwards")
+                if gap_seconds == 0:
+                    duplicate_timestamps += 1
+                largest_gap_seconds = max(largest_gap_seconds, gap_seconds)
+            latest_by_symbol[quote.symbol.upper()] = quote.timestamp
             collected.append(quote)
             # Append one event at a time so a process interruption loses at
             # most the in-flight quote and never an acknowledged batch.
@@ -87,6 +101,10 @@ async def collect_quotes(
         "quotes_written": len(collected),
         "first_quote_at": min(timestamps).isoformat() if timestamps else None,
         "last_quote_at": max(timestamps).isoformat() if timestamps else None,
+        "symbols_seen": sorted(latest_by_symbol),
+        "duplicate_timestamps": duplicate_timestamps,
+        "max_interquote_gap_seconds": largest_gap_seconds,
+        "stream_integrity": "passed",
         "timed_out": timed_out,
         "stream_exhausted": not timed_out and len(collected) < max_quotes,
         "paper_only": True,
