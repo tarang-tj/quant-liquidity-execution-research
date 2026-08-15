@@ -15,7 +15,7 @@ common-path bootstrap contrasts, hard capacity/completion checks, an explicitly
 non-deployable oracle diagnostic, a four-case robustness panel, and an
 an auditable completed-batch recalibration loop. The live bridge also has a
 causal walk-forward evaluator that reports prediction metrics plus a transparent
-turnover and transaction-cost stress accounting. Forty fast invariant tests cover
+turnover and transaction-cost stress accounting. Forty-one fast invariant tests cover
 causality, forecast dynamics, gradients, constraints, path alignment, and
 two-cycle continual-learning timing.
 
