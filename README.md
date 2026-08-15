@@ -1,5 +1,7 @@
 # Regime-Aware Liquidity-Risk Optimal Execution
 
+[![Quality checks](https://github.com/tarang-tj/quant-liquidity-execution-research/actions/workflows/quality.yml/badge.svg)](https://github.com/tarang-tj/quant-liquidity-execution-research/actions/workflows/quality.yml)
+
 A portfolio-quality quant research project that studies whether a strictly causal,
 two-state HMM liquidity filter can improve execution decisions under changing
 market conditions. All data are deterministic synthetic simulations—this is not
