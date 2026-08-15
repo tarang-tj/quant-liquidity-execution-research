@@ -4,19 +4,45 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
+from uuid import uuid4
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from live.market_data import AlpacaMarketDataClient, JsonlEventStore
+from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker
 from live.predictor import LogisticDirectionModel, live_features
 from live.risk import OrderIntent, RiskLimits, validate_paper_order
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def submit_and_record(broker: AlpacaPaperBroker, intent: OrderIntent, decision: PaperDecision,
+                      decision_log: PaperDecisionLog) -> dict[str, object]:
+    """Persist an uncertain attempt before network I/O, then record its outcome."""
+    # This fsync'd record intentionally says "unknown" before sending: a
+    # process crash after the request leaves this host must never make retrying
+    # look safe. Reconcile by client_order_id first.
+    decision_log.append(replace(decision, timestamp=datetime.now(timezone.utc).isoformat(),
+                                event_kind="submission_attempt_started",
+                                submission_state="unknown_reconciliation_required"))
+    try:
+        assert decision.client_order_id is not None
+        order = broker.submit_market_order(intent, decision.client_order_id)
+    except Exception as exc:
+        decision_log.append(replace(decision, timestamp=datetime.now(timezone.utc).isoformat(), event_kind="submission_outcome",
+            submission_error=type(exc).__name__, submission_state="unknown_reconciliation_required"))
+        raise
+    decision_log.append(replace(decision, timestamp=datetime.now(timezone.utc).isoformat(), event_kind="submission_outcome", submitted=True,
+        paper_order_id=str(order.get("id")) if order.get("id") is not None else None,
+        submission_state="submitted"))
+    return order
 
 
 def main() -> None:
@@ -34,23 +60,35 @@ def main() -> None:
     model = LogisticDirectionModel.from_json(model_path)
     if not model.report.deployable_for_paper:
         raise SystemExit("model did not pass the minimum chronological paper-research quality gate")
-    probability = model.predict_probability(live_features(client.bars(args.symbol, args.history_bars)))
+    bars = client.bars(args.symbol, args.history_bars)
+    features = live_features(bars)
+    probability = model.predict_probability(features)
     side = "buy" if probability >= .5 else "sell"
     intent = OrderIntent(args.symbol.upper(), side, args.quantity)
     broker = AlpacaPaperBroker() if args.submit_paper_order else None
     if broker is None:
         decision = validate_paper_order(intent, quote, 0, 0.0, RiskLimits())
         risk_source = "preview only; no broker account read"
+        broker_position = broker_daily_pnl = None
     else:
         state = broker.risk_state(intent.symbol)
         decision = validate_paper_order(intent, quote, state.current_position, state.daily_pnl, RiskLimits())
         risk_source = "Alpaca paper account and position"
+        broker_position, broker_daily_pnl = state.current_position, state.daily_pnl
     report = {"symbol": quote.symbol, "mid_price": quote.mid_price, "spread_bps": quote.spread_bps,
               "probability_next_bar_up": probability, "proposed_side": side, "risk": decision.reason,
               "risk_source": risk_source, "submitted": False, "environment": "paper-only"}
+    audit = PaperDecision.create(model_path=model_path, symbol=quote.symbol, quote=quote, bars=bars,
+                                 features=features.tolist(), probability=probability, side=side,
+                                 risk_approved=decision.approved, risk_reason=decision.reason,
+                                 risk_source=risk_source, broker_position=broker_position,
+                                 broker_daily_pnl=broker_daily_pnl,
+                                 client_order_id=f"research-{uuid4().hex}")
+    decision_log = PaperDecisionLog(ROOT / "runtime" / "paper_decisions.jsonl")
+    audit = decision_log.append(audit)  # Must succeed before any possible network submission.
     if args.submit_paper_order and decision.approved:
         assert broker is not None
-        order = broker.submit_market_order(intent)
+        order = submit_and_record(broker, intent, audit, decision_log)
         report["submitted"] = True
         report["paper_order_id"] = order.get("id")
     print(report)

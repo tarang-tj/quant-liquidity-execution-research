@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+import json
+import multiprocessing
 import os
 import tempfile
 import unittest
@@ -12,9 +15,17 @@ from pathlib import Path
 import numpy as np
 
 from live.market_data import AlpacaMarketDataClient, Bar, MarketDataError, Quote
+from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker, PaperRiskState
 from live.predictor import LogisticDirectionModel, causal_training_matrix, live_features, train_direction_model
+from live.replay_decision import replay
+from live.run_paper import submit_and_record
 from live.risk import OrderIntent, RiskLimits, validate_paper_order
+
+
+def append_in_child(log_path: str, decision: PaperDecision, start: object) -> None:
+    start.wait()
+    PaperDecisionLog(Path(log_path)).append(decision)
 
 
 class LiveBridgeTest(unittest.TestCase):
@@ -100,9 +111,19 @@ class LiveBridgeTest(unittest.TestCase):
         broker.base_url = "https://api.alpaca.markets"  # Must have no effect even if a caller assigns it.
         with patch("live.paper_broker.urlopen") as open_mock:
             open_mock.return_value.__enter__.return_value.read.return_value = b'{"id":"paper-order"}'
-            response = broker.submit_market_order(OrderIntent("SPY", "buy", 1))
+            response = broker.submit_market_order(OrderIntent("SPY", "buy", 1), "paper-test-order")
         self.assertEqual(response["id"], "paper-order")
         self.assertEqual(open_mock.call_args.args[0].full_url, "https://paper-api.alpaca.markets/v2/orders")
+        self.assertEqual(json.loads(open_mock.call_args.args[0].data.decode("utf-8"))["client_order_id"], "paper-test-order")
+
+    def test_reconciliation_uses_fixed_paper_endpoint(self) -> None:
+        broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
+        with patch("live.paper_broker.urlopen") as open_mock:
+            open_mock.return_value.__enter__.return_value.read.return_value = b'{"id":"paper-order","status":"new"}'
+            response = broker.order_by_client_order_id("paper-test-order")
+        self.assertEqual(response["status"], "new")
+        self.assertEqual(open_mock.call_args.args[0].full_url,
+                         "https://paper-api.alpaca.markets/v2/orders:by_client_order_id?client_order_id=paper-test-order")
 
     def test_paper_risk_state_is_broker_sourced_and_fails_closed(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
@@ -118,6 +139,97 @@ class LiveBridgeTest(unittest.TestCase):
                                               limits, self.now).approved)
         self.assertFalse(validate_paper_order(OrderIntent("SPY", "sell", 1), self.quote, -9.9, 0,
                                               limits, self.now).approved)
+
+    def test_decision_log_replays_exactly_and_detects_model_change(self) -> None:
+        model = train_direction_model(self.bars)
+        features = live_features(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, log_path = folder / "model.json", folder / "decisions.jsonl"
+            model.to_json(model_path)
+            PaperDecisionLog(log_path).append(PaperDecision.create(
+                model_path=model_path, symbol="SPY", quote=self.quote, bars=self.bars, features=features.tolist(),
+                probability=model.predict_probability(features), side="buy", risk_approved=True,
+                risk_reason="fixture", risk_source="fixture", broker_position=None, broker_daily_pnl=None))
+            self.assertAlmostEqual(replay(model_path, log_path), model.predict_probability(features))
+            model_path.write_text("{}", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                replay(model_path, log_path)
+
+    def test_decision_log_detects_record_tampering_and_feature_mismatch(self) -> None:
+        model = train_direction_model(self.bars)
+        features = live_features(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, log_path = folder / "model.json", folder / "decisions.jsonl"
+            model.to_json(model_path)
+            record = PaperDecision.create(model_path=model_path, symbol="SPY", quote=self.quote, bars=self.bars,
+                                          features=features.tolist(), probability=model.predict_probability(features),
+                                          side="buy", risk_approved=True, risk_reason="fixture",
+                                          risk_source="fixture", broker_position=None, broker_daily_pnl=None,
+                                          client_order_id="paper-failure-test")
+            PaperDecisionLog(log_path).append(record)
+            log_path.write_text(log_path.read_text(encoding="utf-8").replace("fixture", "edited", 1), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                PaperDecisionLog(log_path).read()
+            log_path.unlink()
+            PaperDecisionLog(log_path).append(replace(record, features=[0.0] * 4))
+            with self.assertRaises(ValueError):
+                replay(model_path, log_path)
+
+    def test_failed_paper_submission_writes_terminal_outcome(self) -> None:
+        model = train_direction_model(self.bars)
+        features = live_features(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, log_path = folder / "model.json", folder / "decisions.jsonl"
+            model.to_json(model_path)
+            record = PaperDecision.create(model_path=model_path, symbol="SPY", quote=self.quote, bars=self.bars,
+                                          features=features.tolist(), probability=model.predict_probability(features),
+                                          side="buy", risk_approved=True, risk_reason="fixture",
+                                          risk_source="fixture", broker_position=None, broker_daily_pnl=None,
+                                          client_order_id="paper-failure-test")
+            journal = PaperDecisionLog(log_path)
+            record = journal.append(record)
+            broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
+            observed_pre_network: list[str] = []
+
+            def network_failure(*_args: object) -> None:
+                observed_pre_network.extend(event.event_kind for event in journal.read())
+                raise MarketDataError("network failure")
+
+            with patch.object(broker, "submit_market_order", side_effect=network_failure):
+                with self.assertRaises(MarketDataError):
+                    submit_and_record(broker, OrderIntent("SPY", "buy", 1), record, journal)
+            events = journal.read()
+            self.assertEqual(observed_pre_network, ["decision", "submission_attempt_started"])
+            self.assertEqual([event.event_kind for event in events],
+                             ["decision", "submission_attempt_started", "submission_outcome"])
+            self.assertEqual(events[1].submission_state, "unknown_reconciliation_required")
+            self.assertEqual(events[-1].submission_error, "MarketDataError")
+            self.assertEqual(events[-1].submission_state, "unknown_reconciliation_required")
+
+    def test_concurrent_writers_preserve_a_single_hash_chain(self) -> None:
+        model = train_direction_model(self.bars)
+        features = live_features(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, log_path = folder / "model.json", folder / "decisions.jsonl"
+            model.to_json(model_path)
+            record = PaperDecision.create(model_path=model_path, symbol="SPY", quote=self.quote, bars=self.bars,
+                                          features=features.tolist(), probability=model.predict_probability(features),
+                                          side="buy", risk_approved=True, risk_reason="fixture",
+                                          risk_source="fixture", broker_position=None, broker_daily_pnl=None)
+            context = multiprocessing.get_context("spawn")
+            start = context.Event()
+            workers = [context.Process(target=append_in_child, args=(str(log_path), record, start)) for _ in range(2)]
+            for worker in workers:
+                worker.start()
+            start.set()
+            for worker in workers:
+                worker.join(timeout=10)
+                self.assertEqual(worker.exitcode, 0)
+            self.assertEqual(len(PaperDecisionLog(log_path).read()), 2)
 
 
 if __name__ == "__main__":

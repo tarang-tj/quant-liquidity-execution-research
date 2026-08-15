@@ -63,6 +63,20 @@ only completed minute bars, never the in-progress bar.
 4. Only after reviewing the logs and model report may you explicitly add
    `--submit-paper-order`. This remains simulation, not production approval.
 
+Every evaluation records its model hash, completed bars, quote, features, risk
+decision, and (only when requested) paper-account state in
+`runtime/paper_decisions.jsonl`; it never records secrets. Replay an entry
+offline to check that the current model recreates the recorded probability:
+
+```bash
+python live/replay_decision.py --model models/SPY_logistic.json --decision-log runtime/paper_decisions.jsonl
+```
+
+The journal uses a locked, local integrity chain and is not a replacement for
+an external signed/WORM audit archive. Each paper request carries a unique
+client-order ID. If its network outcome is unknown, do not retry it; reconcile
+first with `python live/reconcile_paper.py --client-order-id <id>`.
+
 The free Alpaca IEX feed is single-exchange data, not a consolidated market
 feed. A production system also needs entitlement-appropriate consolidated data,
 reconnect/replay handling, corporate-action adjustments, backtests with real

@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from math import isfinite
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from live.market_data import MarketDataError
@@ -65,9 +66,12 @@ class AlpacaPaperBroker:
                 raise
         return PaperRiskState(current_position=current_position, daily_pnl=daily_pnl)
 
-    def submit_market_order(self, intent: OrderIntent) -> dict[str, object]:
+    def submit_market_order(self, intent: OrderIntent, client_order_id: str) -> dict[str, object]:
+        if not client_order_id or len(client_order_id) > 48:
+            raise ValueError("client_order_id must be a non-empty string of at most 48 characters")
         payload = json.dumps({"symbol": intent.symbol.upper(), "qty": str(intent.quantity), "side": intent.side,
-                              "type": "market", "time_in_force": "day"}).encode("utf-8")
+                              "type": "market", "time_in_force": "day",
+                              "client_order_id": client_order_id}).encode("utf-8")
         # Deliberately local and non-configurable: no instance/class endpoint can
         # be changed into a live-trading URL by a caller.
         request = Request("https://paper-api.alpaca.markets/v2/orders", data=payload, method="POST",
@@ -83,6 +87,12 @@ class AlpacaPaperBroker:
         if not isinstance(parsed, dict):
             raise MarketDataError("Alpaca paper-order response must be an object")
         return parsed
+
+    def order_by_client_order_id(self, client_order_id: str) -> dict[str, object]:
+        """Reconcile an uncertain submission before any human retries it."""
+        if not client_order_id:
+            raise ValueError("client_order_id is required for reconciliation")
+        return self._get_json("/v2/orders:by_client_order_id?" + urlencode({"client_order_id": client_order_id}))
 
 
 @dataclass(frozen=True, slots=True)
