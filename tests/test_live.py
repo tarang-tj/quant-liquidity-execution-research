@@ -139,6 +139,9 @@ class LiveBridgeTest(unittest.TestCase):
             pending = score_predictions([decision], self.bars[:-1])
             self.assertEqual(pending["scored"], 0)
             self.assertEqual(pending["pending"], 1)
+            mismatched = score_predictions([replace(decision, symbol="QQQ")], self.bars, symbol="SPY")
+            self.assertEqual(mismatched["scored"], 0)
+            self.assertEqual(mismatched["symbol_mismatch"], 1)
             self.assertTrue(apply_quality_gate(scored, minimum_scored=1)["quality_gate"]["passed"])
             self.assertFalse(apply_quality_gate(pending, minimum_scored=1)["quality_gate"]["passed"])
 
