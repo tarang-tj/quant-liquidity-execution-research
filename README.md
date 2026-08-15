@@ -52,7 +52,10 @@ predictions use only completed minute bars, never the in-progress bar, and the
 decision path rejects model artifacts whose training window extends into the
 future relative to the live bars. Market-data REST snapshots use a small,
 bounded retry budget for transient transport/5xx/429 failures and fail closed
-when that budget is exhausted; order submission has no automatic retry path.
+when that budget is exhausted. Paper submission also reads Alpaca's market
+clock immediately before the risk decision and rejects a closed or malformed
+session state; notional and buying-power gates use the executable bid/ask side,
+not the midpoint; order submission has no automatic retry path.
 
 1. Create separate Alpaca market-data and paper-trading credentials. Put them
    in your shell environment (never commit them); see [`.env.example`](.env.example).
@@ -100,8 +103,8 @@ when that budget is exhausted; order submission has no automatic retry path.
    ```
 
    Before the first evaluation, run the read-only readiness preflight. It reads
-   the model, live data, and paper account/risk snapshot but never creates an
-   order:
+   the model, live data, paper account/risk/buying-power snapshot, and broker market clock
+   but never creates an order:
 
    ```bash
    python live/preflight.py --symbol SPY --max-training-gap-hours 168 \
@@ -149,3 +152,6 @@ when it is exhausted. A production system also needs entitlement-appropriate
 consolidated data, replay/gap recovery, corporate-action adjustments, backtests with real
 transaction costs, independent model/risk approval, monitoring, and a long
 paper-trading record before live capital is considered.
+
+See [`OPERATIONS.md`](OPERATIONS.md) for the staged operator runbook and the
+explicit requirements that remain before any live-capital design.

@@ -145,7 +145,8 @@ class LiveBridgeTest(unittest.TestCase):
             data_client.latest_quote.return_value = self.quote
             data_client.bars.return_value = self.bars[-100:]
             broker = unittest.mock.Mock()
-            broker.risk_state.return_value = PaperRiskState(1, -2, 3, 4)
+            broker.risk_state.return_value = PaperRiskState(1, -2, 3, 4, 1000)
+            broker.market_clock.return_value = True
             report = run_preflight("SPY", model_path, data_client=data_client, broker=broker)
         self.assertTrue(report["ready_for_paper_evaluation"])
         self.assertTrue(report["paper_only"])
@@ -153,6 +154,7 @@ class LiveBridgeTest(unittest.TestCase):
         data_client.latest_quote.assert_called_once_with("SPY")
         data_client.bars.assert_called_once_with("SPY", limit=100)
         broker.risk_state.assert_called_once_with("SPY")
+        broker.market_clock.assert_called_once_with()
         self.assertFalse(hasattr(broker, "submit_market_order") and broker.submit_market_order.called)
 
     def test_finite_read_only_monitor_records_each_sample_without_submission(self) -> None:
@@ -349,6 +351,35 @@ class LiveBridgeTest(unittest.TestCase):
             else:
                 os.environ["TRADING_KILL_SWITCH"] = old
 
+    def test_risk_gate_rejects_closed_or_invalid_market_session(self) -> None:
+        closed = validate_paper_order(OrderIntent("SPY", "buy", 1), self.quote, 0, 0,
+                                      RiskLimits(), self.now, market_open=False)
+        self.assertFalse(closed.approved)
+        self.assertEqual(closed.reason, "market is closed")
+        invalid = validate_paper_order(OrderIntent("SPY", "buy", 1), self.quote, 0, 0,
+                                       RiskLimits(), self.now, market_open=1)  # type: ignore[arg-type]
+        self.assertFalse(invalid.approved)
+        self.assertEqual(invalid.reason, "market session state is invalid")
+
+    def test_risk_gate_enforces_broker_buying_power(self) -> None:
+        rejected = validate_paper_order(OrderIntent("SPY", "buy", 2), self.quote, 0, 0,
+                                        RiskLimits(), self.now, buying_power=1.0)
+        self.assertFalse(rejected.approved)
+        self.assertEqual(rejected.reason, "order exceeds broker buying power")
+        invalid = validate_paper_order(OrderIntent("SPY", "buy", 1), self.quote, 0, 0,
+                                       RiskLimits(), self.now, buying_power=float("nan"))
+        self.assertFalse(invalid.approved)
+        self.assertEqual(invalid.reason, "buying power is invalid")
+
+    def test_risk_notional_uses_executable_side_not_midpoint(self) -> None:
+        quote = Quote("SPY", 99.0, 101.0, 100, 100, self.now, "fixture")
+        limits = RiskLimits(max_order_notional=100.0, max_spread_bps=300.0)
+        rejected = validate_paper_order(OrderIntent("SPY", "buy", 1), quote, 0, 0, limits, self.now)
+        self.assertFalse(rejected.approved)
+        self.assertEqual(rejected.reason, "order notional limit exceeded")
+        accepted = validate_paper_order(OrderIntent("SPY", "sell", 1), quote, 0, 0, limits, self.now)
+        self.assertTrue(accepted.approved)
+
     def test_quote_schema_normalizes_provider_fields(self) -> None:
         quote = Quote.from_alpaca({"S": "SPY", "bp": 100.0, "ap": 100.02, "bs": 10, "as": 12,
                                    "t": "2026-01-02T14:30:00Z"})
@@ -476,6 +507,14 @@ class LiveBridgeTest(unittest.TestCase):
         self.assertEqual(open_mock.call_args.args[0].full_url, "https://paper-api.alpaca.markets/v2/orders")
         self.assertEqual(json.loads(open_mock.call_args.args[0].data.decode("utf-8"))["client_order_id"], "paper-test-order")
 
+    def test_paper_broker_market_clock_requires_boolean_state(self) -> None:
+        broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
+        with patch.object(broker, "_get_json", return_value={"is_open": True}):
+            self.assertTrue(broker.market_clock())
+        with patch.object(broker, "_get_json", return_value={"is_open": "true"}):
+            with self.assertRaises(MarketDataError):
+                broker.market_clock()
+
     def test_reconciliation_uses_fixed_paper_endpoint(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
         with patch("live.paper_broker.urlopen") as open_mock:
@@ -488,10 +527,10 @@ class LiveBridgeTest(unittest.TestCase):
     def test_paper_risk_state_is_broker_sourced_and_fails_closed(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
         with patch.object(broker, "_get_json", side_effect=[
-            {"equity": "1000", "last_equity": "1025"},
+            {"equity": "1000", "last_equity": "1025", "buying_power": "900"},
             [{"symbol": "SPY", "side": "buy", "qty": "4", "filled_qty": "1"}], {"qty": "3"},
         ]):
-            self.assertEqual(broker.risk_state("SPY"), PaperRiskState(3, -25.0, 4, 0))
+            self.assertEqual(broker.risk_state("SPY"), PaperRiskState(3, -25.0, 4, 0, 900))
         with patch.object(broker, "_get_json", side_effect=MarketDataError("unavailable")):
             with self.assertRaises(MarketDataError):
                 broker.risk_state("SPY")
@@ -499,7 +538,7 @@ class LiveBridgeTest(unittest.TestCase):
     def test_invalid_open_order_fails_closed(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
         with patch.object(broker, "_get_json", side_effect=[
-            {"equity": "1000", "last_equity": "1025"},
+            {"equity": "1000", "last_equity": "1025", "buying_power": "900"},
             [{"symbol": "SPY", "side": "buy", "qty": "1", "filled_qty": "2"}], {"qty": "3"},
         ]):
             with self.assertRaises(MarketDataError):
@@ -509,7 +548,7 @@ class LiveBridgeTest(unittest.TestCase):
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
         orders = [{"symbol": "SPY", "side": "buy", "qty": "1", "filled_qty": "0"}] * 500
         with patch.object(broker, "_get_json", side_effect=[
-            {"equity": "1000", "last_equity": "1025"}, orders, {"qty": "3"},
+            {"equity": "1000", "last_equity": "1025", "buying_power": "900"}, orders, {"qty": "3"},
         ]):
             with self.assertRaises(MarketDataError):
                 broker.risk_state("SPY")

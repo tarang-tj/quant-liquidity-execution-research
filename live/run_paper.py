@@ -118,10 +118,12 @@ def main() -> None:
             broker_position = broker_daily_pnl = broker_pending_buy_quantity = broker_pending_sell_quantity = None
         else:
             state = broker.risk_state(intent.symbol)
+            market_open = broker.market_clock()
             decision = validate_paper_order(intent, quote, state.current_position, state.daily_pnl, RiskLimits(),
                                             pending_buy_quantity=state.pending_buy_quantity,
-                                            pending_sell_quantity=state.pending_sell_quantity)
-            risk_source = "Alpaca paper account, position, and open orders"
+                                            pending_sell_quantity=state.pending_sell_quantity,
+                                            market_open=market_open, buying_power=state.buying_power)
+            risk_source = "Alpaca paper account, position, open orders, buying power, and market clock"
             broker_position, broker_daily_pnl = state.current_position, state.daily_pnl
             broker_pending_buy_quantity, broker_pending_sell_quantity = (
                 state.pending_buy_quantity, state.pending_sell_quantity)
