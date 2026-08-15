@@ -14,7 +14,7 @@ if __package__ in {None, ""}:
 
 from live.market_data import AlpacaMarketDataClient
 from live.paper_broker import AlpacaPaperBroker
-from live.predictor import LogisticDirectionModel, validate_paper_model
+from live.predictor import LogisticDirectionModel, validate_model_data_alignment, validate_paper_model
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +46,13 @@ def run_preflight(symbol: str, model_path: Path, history_bars: int = 100,
         else:
             checks.append(_result("market_data", True,
                                   f"quote and {len(bars)} completed one-minute bars received for {quote.symbol}"))
+            if model is not None:
+                try:
+                    validate_model_data_alignment(model, bars)
+                    checks.append(_result("model_data_alignment", True,
+                                          "model training window does not extend beyond live bars"))
+                except ValueError as exc:
+                    checks.append(_result("model_data_alignment", False, str(exc)))
     except Exception as exc:
         checks.append(_result("market_data", False, f"read-only data check failed: {type(exc).__name__}"))
 

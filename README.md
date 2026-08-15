@@ -15,7 +15,7 @@ common-path bootstrap contrasts, hard capacity/completion checks, an explicitly
 non-deployable oracle diagnostic, a four-case robustness panel, and an
 an auditable completed-batch recalibration loop. The live bridge also has a
 causal walk-forward evaluator that reports prediction metrics plus a transparent
-turnover and transaction-cost stress accounting. Thirty-nine fast invariant tests cover
+turnover and transaction-cost stress accounting. Forty fast invariant tests cover
 causality, forecast dynamics, gradients, constraints, path alignment, and
 two-cycle continual-learning timing.
 
@@ -45,7 +45,9 @@ over-reserved rather than undercounted; unavailable or malformed broker state
 fails closed rather than trusting command-line inputs. A non-blocking local
 process lease covers the check-to-submit window. This bridge is deliberately a
 single-host paper runner, not a multi-host/HA execution service. Live
-predictions use only completed minute bars, never the in-progress bar.
+predictions use only completed minute bars, never the in-progress bar, and the
+decision path rejects model artifacts whose training window extends into the
+future relative to the live bars.
 
 1. Create separate Alpaca market-data and paper-trading credentials. Put them
    in your shell environment (never commit them); see [`.env.example`](.env.example).

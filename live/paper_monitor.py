@@ -24,7 +24,8 @@ if __package__ in {None, ""}:
 from live.audit import PaperDecision, PaperDecisionLog, file_sha256
 from live.market_data import AlpacaMarketDataClient
 from live.paper_broker import AlpacaPaperBroker
-from live.predictor import LogisticDirectionModel, live_features, validate_paper_model
+from live.predictor import (LogisticDirectionModel, live_features, validate_model_data_alignment,
+                            validate_paper_model)
 from live.risk import OrderIntent, RiskLimits, validate_paper_order
 
 
@@ -51,6 +52,7 @@ def evaluate_read_only_once(
         raise RuntimeError("model file changed during monitor; refusing to mix model versions")
     quote = data_client.latest_quote(symbol)
     bars = data_client.bars(symbol, limit=history_bars)
+    validate_model_data_alignment(active_model, bars)
     features = live_features(bars)
     probability = active_model.predict_probability(features)
     side = "buy" if probability >= 0.5 else "sell"

@@ -21,7 +21,8 @@ from live.market_data import AlpacaMarketDataClient, Bar, MarketDataError, Quote
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker, PaperRiskState
 from live.predictor import (LogisticDirectionModel, causal_training_matrix, live_features,
-                            train_direction_model, training_config_sha256, training_data_sha256)
+                            train_direction_model, training_config_sha256, training_data_sha256,
+                            validate_model_data_alignment)
 from live.predictor import validate_paper_model
 from live.preflight import run_preflight
 from live.paper_monitor import run_monitor
@@ -248,6 +249,17 @@ class LiveBridgeTest(unittest.TestCase):
         unsorted[0], unsorted[1] = unsorted[1], unsorted[0]
         with self.assertRaises(ValueError):
             train_direction_model(unsorted)
+
+    def test_model_data_alignment_rejects_future_and_stale_training_windows(self) -> None:
+        model = train_direction_model(self.bars)
+        future_report = replace(model.report, training_end=(self.bars[-1].timestamp + timedelta(minutes=1)).isoformat())
+        with self.assertRaises(ValueError):
+            validate_model_data_alignment(replace(model, report=future_report), self.bars)
+        old_report = replace(model.report, training_end=(self.bars[-2].timestamp).isoformat())
+        with self.assertRaises(ValueError):
+            validate_model_data_alignment(replace(model, report=old_report), self.bars, max_training_gap_seconds=1)
+        with self.assertRaises(ValueError):
+            validate_model_data_alignment(model, self.bars, max_training_gap_seconds=float("nan"))
 
     def test_paper_model_requires_matching_complete_provenance(self) -> None:
         model = train_direction_model(self.bars)

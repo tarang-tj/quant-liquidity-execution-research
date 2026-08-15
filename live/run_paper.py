@@ -17,7 +17,8 @@ if __package__ in {None, ""}:
 from live.market_data import AlpacaMarketDataClient, JsonlEventStore
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker
-from live.predictor import LogisticDirectionModel, live_features, validate_paper_model
+from live.predictor import (LogisticDirectionModel, live_features, validate_model_data_alignment,
+                            validate_paper_model)
 from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
 
 
@@ -95,6 +96,7 @@ def main() -> None:
     model = LogisticDirectionModel.from_json(model_path)
     validate_paper_model(model, args.symbol)
     bars = client.bars(args.symbol, args.history_bars)
+    validate_model_data_alignment(model, bars)
     features = live_features(bars)
     probability = model.predict_probability(features)
     side = "buy" if probability >= .5 else "sell"

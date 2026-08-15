@@ -227,6 +227,31 @@ def validate_paper_model(model: LogisticDirectionModel, symbol: str, timeframe: 
         raise ValueError("model lacks complete training provenance for paper evaluation")
 
 
+def validate_model_data_alignment(model: LogisticDirectionModel, bars: list[Bar],
+                                  max_training_gap_seconds: float | None = None) -> None:
+    """Reject a model trained after live data or beyond an optional freshness SLA."""
+    if not bars:
+        raise ValueError("live bars are required for model-data alignment")
+    if max_training_gap_seconds is not None and (
+            isinstance(max_training_gap_seconds, bool) or not isinstance(max_training_gap_seconds, (int, float))
+            or not np.isfinite(max_training_gap_seconds) or max_training_gap_seconds < 0):
+        raise ValueError("max_training_gap_seconds must be a finite non-negative number")
+    timestamps = [bar.timestamp.astimezone(timezone.utc) for bar in bars]
+    if any(left >= right for left, right in zip(timestamps, timestamps[1:])):
+        raise ValueError("live bars must be strictly chronological")
+    if model.report.training_end is None:
+        raise ValueError("model lacks training_end provenance")
+    training_end = datetime.fromisoformat(model.report.training_end.replace("Z", "+00:00"))
+    if training_end.tzinfo is None:
+        raise ValueError("model training_end must include a timezone")
+    latest = timestamps[-1]
+    if training_end > latest:
+        raise ValueError("model training_end is later than the latest live bar")
+    if (max_training_gap_seconds is not None and
+            (latest - training_end).total_seconds() > float(max_training_gap_seconds)):
+        raise ValueError("model training data is older than the configured freshness window")
+
+
 def train_direction_model(bars: list[Bar], lookback: int = 20, validation_fraction: float = 0.30,
                           learning_rate: float = 0.08, iterations: int = 1_500, l2: float = 0.02,
                           timeframe: str = "1Min") -> LogisticDirectionModel:
