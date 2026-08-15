@@ -35,7 +35,8 @@ Start with [`题目分析报告.md`](题目分析报告.md) for the model contra
 
 `live/` adds a deliberately constrained path from synthetic research to real
 US-equity data.  It has an Alpaca adapter for normalized quotes, minute bars,
-and optional WebSocket quote streaming; a deterministic logistic next-bar
+and optional WebSocket quote streaming; a bounded collector that durably writes
+normalized WebSocket quotes to JSONL; a deterministic logistic next-bar
 direction baseline trained on a chronological split; a locally durable,
 concurrency-safe quote journal; and fail-closed risk gates. It **cannot submit
 a live order**: the
@@ -134,6 +135,16 @@ not the midpoint; order submission has no automatic retry path.
    ```bash
    python live/preflight.py --symbol SPY --max-training-gap-hours 168 \
      --max-bar-gap-minutes 3
+   ```
+
+   To capture a finite, auditable WebSocket sample for feed-health and replay
+   checks, use the read-only collector. It stops after the quote or wall-clock
+   budget and never invokes the broker:
+
+   ```bash
+   python live/stream_quotes.py --symbols SPY --feed iex \
+     --max-quotes 100 --timeout-seconds 60 \
+     --output runtime/SPY_quotes.jsonl
    ```
 
    After the monitor has produced a quality report and journal, the combined

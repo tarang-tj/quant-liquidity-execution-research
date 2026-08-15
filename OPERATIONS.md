@@ -38,6 +38,18 @@ buying-power state, broker market clock, and the validated exchange trading cale
 (including early-close sessions). It never creates an order. A closed market is
 reported as a normal state; malformed or unavailable state fails the check.
 
+For a bounded feed-health sample, capture normalized WebSocket quotes without
+touching the broker:
+
+```bash
+python live/stream_quotes.py --symbols SPY --max-quotes 100 \
+  --timeout-seconds 60 --output runtime/SPY_quotes.jsonl
+```
+
+The collector exits after its finite quote/time budget, fsyncs each JSONL event,
+and reports whether the stream exhausted or timed out. An empty sample is a
+failure; it is not evidence that the feed is healthy.
+
 ## Stage 2: causal evaluation and promotion
 
 Use the same feed entitlement and corporate-action adjustment policy for
