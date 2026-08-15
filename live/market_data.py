@@ -97,18 +97,35 @@ class Bar:
 
 
 class JsonlEventStore:
-    """Append-only normalized event store; secrets and raw HTTP headers are never written."""
+    """Durable append-only normalized event store.
+
+    A single exclusive lock covers the whole batch so separate quote-stream
+    workers cannot interleave JSON lines.  The file is flushed and fsynced
+    before the lock is released; this is local durability, not a replicated
+    or tamper-evident event archive.
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = path
 
     def append_quotes(self, quotes: Iterable[Quote]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        records: list[str] = []
+        for quote in quotes:
+            record = asdict(quote)
+            record["timestamp"] = quote.timestamp.isoformat()
+            records.append(json.dumps(record, sort_keys=True) + "\n")
+        if not records:
+            return
+        import fcntl  # POSIX target: this research system runs on macOS/Linux.
         with self.path.open("a", encoding="utf-8") as handle:
-            for quote in quotes:
-                record = asdict(quote)
-                record["timestamp"] = quote.timestamp.isoformat()
-                handle.write(json.dumps(record, sort_keys=True) + "\n")
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.writelines(records)
+                handle.flush()
+                os.fsync(handle.fileno())
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 class AlpacaMarketDataClient:

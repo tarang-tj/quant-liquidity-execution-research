@@ -39,6 +39,12 @@ def append_in_child(log_path: str, decision: PaperDecision, start: object) -> No
     PaperDecisionLog(Path(log_path)).append(decision)
 
 
+def append_quotes_in_child(log_path: str, quote: Quote, start: object) -> None:
+    start.wait()
+    from live.market_data import JsonlEventStore
+    JsonlEventStore(Path(log_path)).append_quotes([quote])
+
+
 def reconcile_in_child(log_path: str, client_order_id: str, start: object, outcomes: object) -> None:
     start.wait()
     try:
@@ -351,6 +357,29 @@ class LiveBridgeTest(unittest.TestCase):
         with patch.object(client, "_get_json", return_value=payload):
             bars = client.bars("SPY", limit=3, completed_before=now)
         self.assertEqual([bar.timestamp.minute for bar in bars], [30, 31])
+
+    def test_quote_event_store_serializes_concurrent_durable_appends(self) -> None:
+        from live.market_data import JsonlEventStore
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quotes.jsonl"
+            start = multiprocessing.Event()
+            processes = [multiprocessing.Process(
+                target=append_quotes_in_child,
+                args=(str(path), replace(self.quote, timestamp=self.now + timedelta(microseconds=index)), start),
+            ) for index in range(8)]
+            for process in processes:
+                process.start()
+            start.set()
+            for process in processes:
+                process.join(timeout=10)
+                self.assertEqual(process.exitcode, 0)
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 8)
+            records = [json.loads(line) for line in lines]
+            self.assertTrue(all(record["symbol"] == "SPY" for record in records))
+            # A subsequent append must observe the complete prior file.
+            JsonlEventStore(path).append_quotes([self.quote])
+            self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 9)
 
     def test_websocket_stream_reconnects_with_a_bounded_budget(self) -> None:
         quote_message = json.dumps({"T": "q", "S": "SPY", "bp": 100.0, "ap": 100.02,

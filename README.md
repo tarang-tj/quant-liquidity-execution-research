@@ -34,8 +34,9 @@ Start with [`题目分析报告.md`](题目分析报告.md) for the model contra
 `live/` adds a deliberately constrained path from synthetic research to real
 US-equity data.  It has an Alpaca adapter for normalized quotes, minute bars,
 and optional WebSocket quote streaming; a deterministic logistic next-bar
-direction baseline trained on a chronological split; append-only local quote
-logging; and fail-closed risk gates. It **cannot submit a live order**: the
+direction baseline trained on a chronological split; a locally durable,
+concurrency-safe quote journal; and fail-closed risk gates. It **cannot submit
+a live order**: the
 only broker adapter hard-codes Alpaca's paper-trading endpoint, and even a
 paper order requires `--submit-paper-order` plus fresh quote, spread, position,
 open-order reservations, notional, daily-loss, and kill-switch checks. At
