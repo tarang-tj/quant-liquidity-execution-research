@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
 from pathlib import Path
 
 import numpy as np
@@ -345,6 +346,18 @@ class LiveBridgeTest(unittest.TestCase):
                                    "t": "2026-01-02T14:30:00Z"})
         self.assertEqual(quote.symbol, "SPY")
         self.assertAlmostEqual(quote.spread_bps, 2.0, places=3)
+
+    def test_market_data_retries_transient_transport_failure_with_bound(self) -> None:
+        client = AlpacaMarketDataClient(key="data-key", secret="data-secret", max_retries=1,
+                                        retry_backoff_seconds=0)
+        response = unittest.mock.Mock()
+        response.__enter__ = lambda _: response
+        response.__exit__ = lambda *_args: None
+        response.read.return_value = b'{"quote":{"S":"SPY","bp":100,"ap":100.02,"bs":1,"as":2,"t":"2026-01-02T14:30:00Z"}}'
+        with patch("live.market_data.urlopen", side_effect=[URLError("temporary"), response]) as open_mock:
+            quote = client.latest_quote("SPY")
+        self.assertEqual(quote.symbol, "SPY")
+        self.assertEqual(open_mock.call_count, 2)
 
     def test_market_data_excludes_current_partial_bar(self) -> None:
         client = AlpacaMarketDataClient(key="data-key", secret="data-secret")

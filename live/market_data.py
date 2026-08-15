@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from math import isfinite
@@ -137,25 +138,41 @@ class AlpacaMarketDataClient:
 
     base_url = "https://data.alpaca.markets"
 
-    def __init__(self, key: str | None = None, secret: str | None = None, feed: str = "iex") -> None:
+    def __init__(self, key: str | None = None, secret: str | None = None, feed: str = "iex",
+                 max_retries: int = 2, retry_backoff_seconds: float = 0.5) -> None:
         self.key = key or os.environ.get("ALPACA_DATA_KEY")
         self.secret = secret or os.environ.get("ALPACA_DATA_SECRET")
         self.feed = feed
         if not self.key or not self.secret:
             raise MarketDataError("set ALPACA_DATA_KEY and ALPACA_DATA_SECRET; never put credentials in source files")
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool) or not 0 <= max_retries <= 5:
+            raise ValueError("max_retries must be an integer between 0 and 5")
+        if (isinstance(retry_backoff_seconds, bool) or not isinstance(retry_backoff_seconds, (int, float))
+                or not isfinite(retry_backoff_seconds) or retry_backoff_seconds < 0
+                or retry_backoff_seconds > 30):
+            raise ValueError("retry_backoff_seconds must be between 0 and 30 seconds")
+        self.max_retries = max_retries
+        self.retry_backoff_seconds = float(retry_backoff_seconds)
 
     def _get_json(self, path: str, query: dict[str, str] | None = None) -> dict[str, object]:
         url = f"{self.base_url}{path}"
         if query:
             url = f"{url}?{urlencode(query)}"
         request = Request(url, headers={"APCA-API-KEY-ID": self.key, "APCA-API-SECRET-KEY": self.secret, "Accept": "application/json"})
-        try:
-            with urlopen(request, timeout=15) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            raise MarketDataError(f"Alpaca market-data HTTP {exc.code}; check entitlement, symbol, and feed") from exc
-        except (URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise MarketDataError("Alpaca market-data request failed") from exc
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urlopen(request, timeout=15) as response:
+                    parsed = json.loads(response.read().decode("utf-8"))
+                break
+            except HTTPError as exc:
+                transient = exc.code == 429 or 500 <= exc.code <= 599
+                if not transient or attempt >= self.max_retries:
+                    raise MarketDataError(
+                        f"Alpaca market-data HTTP {exc.code}; check entitlement, symbol, and feed") from exc
+            except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+                if attempt >= self.max_retries:
+                    raise MarketDataError("Alpaca market-data request failed") from exc
+            time.sleep(self.retry_backoff_seconds * (2 ** attempt))
         if not isinstance(parsed, dict):
             raise MarketDataError("Alpaca market-data response must be an object")
         return parsed

@@ -50,7 +50,9 @@ process lease covers the check-to-submit window. This bridge is deliberately a
 single-host paper runner, not a multi-host/HA execution service. Live
 predictions use only completed minute bars, never the in-progress bar, and the
 decision path rejects model artifacts whose training window extends into the
-future relative to the live bars.
+future relative to the live bars. Market-data REST snapshots use a small,
+bounded retry budget for transient transport/5xx/429 failures and fail closed
+when that budget is exhausted; order submission has no automatic retry path.
 
 1. Create separate Alpaca market-data and paper-trading credentials. Put them
    in your shell environment (never commit them); see [`.env.example`](.env.example).
