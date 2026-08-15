@@ -79,16 +79,20 @@ records when the bar is not yet available:
 ```bash
 python live/score_predictions.py --symbol SPY \
   --decision-log runtime/paper_monitor_decisions.jsonl --bars 1000 \
-  --minimum-scored 20 --minimum-accuracy 0.52 --maximum-brier 0.25
+  --minimum-scored 20 --minimum-accuracy 0.52 --maximum-brier 0.25 \
+  --output runtime/SPY_quality.json
 ```
 
 Treat a nonzero exit as a hold condition: do not promote or submit based on a
 model whose live evidence is insufficient or fails the configured quality gate.
+The output report is atomically written and pinned to one model hash. Paper
+submission rejects a missing, stale, mixed-model, symbol-mismatched, or failed
+report.
 
 ## Stage 4: explicitly authorized paper submission
 
 Only after the preceding evidence is reviewed may an operator use
-`--submit-paper-order`. The adapter has a fixed Alpaca paper endpoint, reads
+`--submit-paper-order --quality-report runtime/SPY_quality.json`. The adapter has a fixed Alpaca paper endpoint, reads
 broker state immediately before validation, requires an open market clock, and
 has no automatic retry path. The local submission lease is single-host only;
 this is not a highly available execution service.

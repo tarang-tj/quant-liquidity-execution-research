@@ -31,9 +31,9 @@ from live.paper_monitor import run_monitor
 from live.promote_model import promote_if_qualified
 from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
-from live.run_paper import submit_and_record
+from live.run_paper import submit_and_record, validate_quality_report
 from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
-from live.score_predictions import apply_quality_gate, score_predictions
+from live.score_predictions import apply_quality_gate, build_quality_report, score_predictions, write_quality_report
 from live.walk_forward import walk_forward_evaluate
 
 
@@ -144,6 +144,41 @@ class LiveBridgeTest(unittest.TestCase):
             self.assertEqual(mismatched["symbol_mismatch"], 1)
             self.assertTrue(apply_quality_gate(scored, minimum_scored=1)["quality_gate"]["passed"])
             self.assertFalse(apply_quality_gate(pending, minimum_scored=1)["quality_gate"]["passed"])
+            report = build_quality_report([decision], scored, symbol="SPY", minimum_scored=1,
+                                          generated_at=self.now)
+            self.assertTrue(report["quality_gate"]["passed"])
+            self.assertEqual(report["model_sha256"], decision.model_sha256)
+            report_path = Path(directory) / "quality.json"
+            write_quality_report(report, report_path)
+            self.assertEqual(json.loads(report_path.read_text(encoding="utf-8"))["report_type"],
+                             "live_quality_gate")
+
+    def test_quality_report_is_fresh_and_pinned_before_paper_submission(self) -> None:
+        model = train_direction_model(self.bars)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            model_path, report_path = folder / "model.json", folder / "quality.json"
+            model.to_json(model_path)
+            report = {
+                "report_type": "live_quality_gate", "symbol": "SPY",
+                "model_sha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
+                "generated_at": self.now.isoformat(),
+                "quality_gate": {"passed": True},
+            }
+            write_quality_report(report, report_path)
+            checked = validate_quality_report(report_path, symbol="SPY",
+                                              model_sha256=report["model_sha256"], now=self.now,
+                                              max_age_seconds=60)
+            self.assertTrue(checked["quality_gate"]["passed"])
+            for mutation in ({"symbol": "QQQ"}, {"model_sha256": "0" * 64},
+                             {"quality_gate": {"passed": False}}):
+                invalid = dict(report)
+                invalid.update(mutation)
+                write_quality_report(invalid, report_path)
+                with self.assertRaises(ValueError):
+                    validate_quality_report(report_path, symbol="SPY",
+                                            model_sha256=report["model_sha256"], now=self.now,
+                                            max_age_seconds=60)
 
     def test_model_rotation_is_atomic_and_preserves_previous_artifact_on_failure(self) -> None:
         model = train_direction_model(self.bars)

@@ -7,6 +7,8 @@ import argparse
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime, timezone
+import json
+from math import isfinite
 from pathlib import Path
 import sys
 from uuid import uuid4
@@ -15,7 +17,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from live.market_data import AlpacaMarketDataClient, JsonlEventStore
-from live.audit import PaperDecision, PaperDecisionLog
+from live.audit import PaperDecision, PaperDecisionLog, file_sha256
 from live.paper_broker import AlpacaPaperBroker
 from live.predictor import (LogisticDirectionModel, direction_from_probability, live_features,
                             validate_model_data_alignment,
@@ -24,6 +26,38 @@ from live.risk import OrderIntent, PaperSubmissionLease, RiskDecision, RiskLimit
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def validate_quality_report(path: Path, *, symbol: str, model_sha256: str,
+                            now: datetime | None = None,
+                            max_age_seconds: float = 86_400.0) -> dict[str, object]:
+    """Require fresh, symbol/model-matched passed evidence before submission."""
+    if not isfinite(max_age_seconds) or max_age_seconds < 0:
+        raise ValueError("max_quality_age_seconds must be finite and non-negative")
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("quality report is unavailable or invalid") from exc
+    if not isinstance(report, dict) or report.get("report_type") != "live_quality_gate":
+        raise ValueError("quality report has an unsupported schema")
+    if report.get("symbol") != symbol.upper():
+        raise ValueError("quality report symbol does not match the requested symbol")
+    if report.get("model_sha256") != model_sha256:
+        raise ValueError("quality report model hash does not match the active model")
+    gate = report.get("quality_gate")
+    if not isinstance(gate, dict) or gate.get("passed") is not True:
+        raise ValueError("quality report has not passed its model-health gate")
+    try:
+        generated_at = datetime.fromisoformat(str(report["generated_at"]).replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("quality report timestamp is invalid") from exc
+    if generated_at.tzinfo is None:
+        raise ValueError("quality report timestamp must include a timezone")
+    reference = now or datetime.now(timezone.utc)
+    age = (reference.astimezone(timezone.utc) - generated_at.astimezone(timezone.utc)).total_seconds()
+    if age < 0 or age > max_age_seconds:
+        raise ValueError("quality report is stale or from the future")
+    return report
 
 
 def _already_reconciled(decision_log: PaperDecisionLog, client_order_id: str,
@@ -97,6 +131,10 @@ def main() -> None:
                         help="abstain (hold) unless probability is this far from 0.5; default 0")
     parser.add_argument("--quantity", type=int, default=1)
     parser.add_argument("--submit-paper-order", action="store_true", help="explicitly submit a qualifying paper order")
+    parser.add_argument("--quality-report", type=Path,
+                        help="passed model-health report required for paper submission")
+    parser.add_argument("--max-quality-age-hours", type=float, default=24.0,
+                        help="maximum age of the required quality report")
     args = parser.parse_args()
     client = AlpacaMarketDataClient(feed=args.feed)
     quote = client.latest_quote(args.symbol)
@@ -104,6 +142,15 @@ def main() -> None:
     model_path = args.model or ROOT / "models" / f"{args.symbol.upper()}_logistic.json"
     model = LogisticDirectionModel.from_json(model_path)
     validate_paper_model(model, args.symbol)
+    if args.submit_paper_order:
+        if args.quality_report is None:
+            raise ValueError("--quality-report is required with --submit-paper-order")
+        validate_quality_report(
+            args.quality_report,
+            symbol=args.symbol,
+            model_sha256=file_sha256(model_path),
+            max_age_seconds=args.max_quality_age_hours * 3_600,
+        )
     bars = client.bars(args.symbol, args.history_bars)
     gap_seconds = None if args.max_training_gap_hours is None else args.max_training_gap_hours * 3_600
     bar_gap_seconds = None if args.max_bar_gap_minutes is None else args.max_bar_gap_minutes * 60

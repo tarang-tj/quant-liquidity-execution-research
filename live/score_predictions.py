@@ -13,6 +13,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import json
 from math import isfinite
+import os
 from pathlib import Path
 import sys
 from typing import Iterable
@@ -125,6 +126,42 @@ def apply_quality_gate(metrics: dict[str, object], *, minimum_scored: int = 20,
     return result
 
 
+def build_quality_report(decisions: Iterable[PaperDecision], metrics: dict[str, object], *,
+                         symbol: str, minimum_scored: int = 20,
+                         minimum_accuracy: float = 0.52, maximum_brier: float = 0.25,
+                         generated_at: datetime | None = None) -> dict[str, object]:
+    """Build a durable, model-pinned quality report for the paper gate."""
+    target_symbol = symbol.upper()
+    matching = [decision for decision in decisions
+                if decision.event_kind == "decision" and decision.symbol.upper() == target_symbol]
+    model_hashes = sorted({decision.model_sha256 for decision in matching if decision.model_sha256})
+    report = apply_quality_gate(
+        metrics,
+        minimum_scored=minimum_scored,
+        minimum_accuracy=minimum_accuracy,
+        maximum_brier=maximum_brier,
+    )
+    checks = dict(report["quality_gate"]["checks"])
+    checks["single_model"] = len(model_hashes) == 1
+    report["quality_gate"] = dict(report["quality_gate"], passed=all(checks.values()), checks=checks)
+    report.update({
+        "report_type": "live_quality_gate",
+        "symbol": target_symbol,
+        "model_sha256": model_hashes[0] if len(model_hashes) == 1 else None,
+        "model_hashes": model_hashes,
+        "generated_at": (generated_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat(),
+    })
+    return report
+
+
+def write_quality_report(report: dict[str, object], path: Path) -> None:
+    """Atomically write a quality report so readers never see partial JSON."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score journaled live predictions without submitting orders")
     parser.add_argument("--symbol", required=True)
@@ -134,13 +171,21 @@ def main() -> None:
     parser.add_argument("--minimum-scored", type=int, default=20)
     parser.add_argument("--minimum-accuracy", type=float, default=0.52)
     parser.add_argument("--maximum-brier", type=float, default=0.25)
+    parser.add_argument("--output", type=Path,
+                        help="optional path for an atomic model-pinned quality report")
     args = parser.parse_args()
     decisions = PaperDecisionLog(args.decision_log).read()
     bars = AlpacaMarketDataClient(feed=args.feed).bars(args.symbol, limit=args.bars)
-    report = apply_quality_gate(
-        score_predictions(decisions, bars, symbol=args.symbol), minimum_scored=args.minimum_scored,
-        minimum_accuracy=args.minimum_accuracy, maximum_brier=args.maximum_brier,
+    report = build_quality_report(
+        decisions,
+        score_predictions(decisions, bars, symbol=args.symbol),
+        symbol=args.symbol,
+        minimum_scored=args.minimum_scored,
+        minimum_accuracy=args.minimum_accuracy,
+        maximum_brier=args.maximum_brier,
     )
+    if args.output:
+        write_quality_report(report, args.output)
     print(json.dumps(report, sort_keys=True))
     if not report["quality_gate"]["passed"]:
         raise SystemExit(1)
