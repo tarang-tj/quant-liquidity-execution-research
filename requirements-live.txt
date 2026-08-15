@@ -1,0 +1,2 @@
+# Required only for real-time WebSocket streaming; REST snapshots use Python's standard library.
+websockets>=15,<17

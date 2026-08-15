@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import unittest
 import json
+import tempfile
+from pathlib import Path
 
 import numpy as np
 
@@ -75,27 +77,31 @@ class ResearchInvariantsTest(unittest.TestCase):
         learned = fit_filter(self.market)
         np.testing.assert_allclose(learned.transition.sum(axis=1), 1.0, atol=1e-12)
         self.assertTrue(np.all(np.linalg.eigvalsh(learned.emission_covariances) > 0))
-        report = run_cycles(Params(paths=4, bootstrap_reps=10), cycles=1, initial_train_paths=8, eval_paths=4)
-        self.assertEqual(len(report), 1)
-        self.assertLessEqual(float(report.max_completion_error.max()), 1e-8)
-        self.assertLessEqual(float(report.max_constraint_violation.max()), 1e-8)
+        with tempfile.TemporaryDirectory() as directory:
+            report = run_cycles(Params(paths=4, bootstrap_reps=10), cycles=1, initial_train_paths=8, eval_paths=4,
+                                output_dir=Path(directory))
+            self.assertEqual(len(report), 1)
+            self.assertLessEqual(float(report.max_completion_error.max()), 1e-8)
+            self.assertLessEqual(float(report.max_constraint_violation.max()), 1e-8)
 
     def test_two_cycle_snapshots_exclude_current_holdout_and_policy_ignores_labels(self) -> None:
         params = Params(seed=313, paths=6, bootstrap_reps=10)
-        report = run_cycles(params, cycles=2, initial_train_paths=10, eval_paths=6)
-        snapshot = json.loads((__import__("pathlib").Path("results") / "online_filter_snapshot.json").read_text())
-        first, second = snapshot["cycle_snapshots"]
-        self.assertEqual(len(first["training_batches"]), 1)
-        self.assertEqual(first["holdout_batch"]["seed"], params.seed + 10_001)
-        self.assertEqual(len(second["training_batches"]), 2)
-        self.assertEqual(second["training_batches"][1]["seed"], first["holdout_batch"]["seed"])
-        model = fit_filter(generate_market(Params(seed=99, paths=20)))
-        holdout = generate_market(Params(seed=100, paths=4))
-        original = simulate_policy(holdout, "regime_aware_mpc", params, belief_model=model)[0]
-        altered = holdout.copy(); altered["regime_true"] = 1 - altered["regime_true"]
-        candidate = simulate_policy(altered, "regime_aware_mpc", params, belief_model=model)[0]
-        np.testing.assert_allclose(original.trade_fraction, candidate.trade_fraction, atol=0.0, rtol=0.0)
-        self.assertEqual(len(report), 2)
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            report = run_cycles(params, cycles=2, initial_train_paths=10, eval_paths=6, output_dir=output_dir)
+            snapshot = json.loads((output_dir / "online_filter_snapshot.json").read_text())
+            first, second = snapshot["cycle_snapshots"]
+            self.assertEqual(len(first["training_batches"]), 1)
+            self.assertEqual(first["holdout_batch"]["seed"], params.seed + 10_001)
+            self.assertEqual(len(second["training_batches"]), 2)
+            self.assertEqual(second["training_batches"][1]["seed"], first["holdout_batch"]["seed"])
+            model = fit_filter(generate_market(Params(seed=99, paths=20)))
+            holdout = generate_market(Params(seed=100, paths=4))
+            original = simulate_policy(holdout, "regime_aware_mpc", params, belief_model=model)[0]
+            altered = holdout.copy(); altered["regime_true"] = 1 - altered["regime_true"]
+            candidate = simulate_policy(altered, "regime_aware_mpc", params, belief_model=model)[0]
+            np.testing.assert_allclose(original.trade_fraction, candidate.trade_fraction, atol=0.0, rtol=0.0)
+            self.assertEqual(len(report), 2)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -86,7 +87,8 @@ def fit_filter(completed_batches: pd.DataFrame, shrinkage: float = 0.08) -> Cali
     return learned
 
 
-def run_cycles(params: Params, cycles: int, initial_train_paths: int, eval_paths: int) -> pd.DataFrame:
+def run_cycles(params: Params, cycles: int, initial_train_paths: int, eval_paths: int,
+               output_dir: Path | None = None) -> pd.DataFrame:
     """Train on completed history and score independent next-batch performance."""
     if min(cycles, initial_train_paths, eval_paths) <= 0:
         raise ValueError("cycles and path counts must be positive")
@@ -133,12 +135,13 @@ def run_cycles(params: Params, cycles: int, initial_train_paths: int, eval_paths
         offset = cycle * 1_000_000
         training = pd.concat([training, evaluation.assign(path_id=evaluation.path_id + offset)], ignore_index=True)
         training_batches.append({"seed": evaluation_seed, "paths": eval_paths, "path_id_offset": offset})
-    RESULTS.mkdir(exist_ok=True)
+    output_dir = RESULTS if output_dir is None else Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     output = pd.DataFrame(rows)
     if output.max_completion_error.max() > 1e-8 or output.max_constraint_violation.max() > 1e-8:
         raise RuntimeError("continual-learning execution validation failed")
-    output.to_csv(RESULTS / "online_learning_metrics.csv", index=False)
-    pd.concat(holdout_diagnostics, ignore_index=True).to_csv(RESULTS / "online_holdout_diagnostics.csv", index=False)
+    output.to_csv(output_dir / "online_learning_metrics.csv", index=False)
+    pd.concat(holdout_diagnostics, ignore_index=True).to_csv(output_dir / "online_holdout_diagnostics.csv", index=False)
     learned = fit_filter(training)
     snapshot = {
         "scope": "synthetic completed-batch supervised recalibration; not a live deployment model",
@@ -152,7 +155,7 @@ def run_cycles(params: Params, cycles: int, initial_train_paths: int, eval_paths
             "emission_covariances": learned.emission_covariances.tolist(),
         },
     }
-    (RESULTS / "online_filter_snapshot.json").write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+    (output_dir / "online_filter_snapshot.json").write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
     return output
 
 

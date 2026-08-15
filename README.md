@@ -26,3 +26,45 @@ python -m unittest discover -s tests -v && python run_research.py --mode full --
 
 Start with [`题目分析报告.md`](题目分析报告.md) for the model contract and
 [`results/summary_metrics.csv`](results/summary_metrics.csv) for outcome metrics.
+
+## Live-market and predictive research bridge (paper-only)
+
+`live/` adds a deliberately constrained path from synthetic research to real
+US-equity data.  It has an Alpaca adapter for normalized quotes, minute bars,
+and optional WebSocket quote streaming; a deterministic logistic next-bar
+direction baseline trained on a chronological split; append-only local quote
+logging; and fail-closed risk gates. It **cannot submit a live order**: the
+only broker adapter hard-codes Alpaca's paper-trading endpoint, and even a
+paper order requires `--submit-paper-order` plus fresh quote, spread, position,
+notional, daily-loss, and kill-switch checks. At submission time, position and
+daily P&L are read from the fixed Alpaca paper account; unavailable broker state
+fails closed rather than trusting command-line inputs. Live predictions use
+only completed minute bars, never the in-progress bar.
+
+1. Create separate Alpaca market-data and paper-trading credentials. Put them
+   in your shell environment (never commit them); see [`.env.example`](.env.example).
+2. Train using historical bars. The command below fetches bars only when data
+   credentials are present; `--input` supports an offline CSV with
+   `timestamp,open,high,low,close,volume` for reproducible tests. A bundled
+   format fixture verifies the offline path:
+
+   ```bash
+   python live/train_predictor.py --symbol SPY --bars 1000
+   python live/train_predictor.py --symbol SPY --input tests/fixtures/spy_bars.csv --output /tmp/spy_model.json
+   ```
+
+3. Evaluate a fresh quote and print the paper-order recommendation. It does not
+   submit anything by default:
+
+   ```bash
+   python live/run_paper.py --symbol SPY
+   ```
+
+4. Only after reviewing the logs and model report may you explicitly add
+   `--submit-paper-order`. This remains simulation, not production approval.
+
+The free Alpaca IEX feed is single-exchange data, not a consolidated market
+feed. A production system also needs entitlement-appropriate consolidated data,
+reconnect/replay handling, corporate-action adjustments, backtests with real
+transaction costs, independent model/risk approval, monitoring, and a long
+paper-trading record before live capital is considered.
