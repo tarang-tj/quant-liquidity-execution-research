@@ -121,6 +121,20 @@ not the midpoint; order submission has no automatic retry path.
      --max-bar-gap-minutes 3
    ```
 
+   After the monitor has produced a quality report and journal, the combined
+   read-only health snapshot is suitable for a scheduler or alerting adapter:
+
+   ```bash
+   python live/health.py --symbol SPY \
+     --quality-report runtime/SPY_quality.json \
+     --decision-log runtime/paper_monitor_decisions.jsonl \
+     --max-training-gap-hours 168 --max-bar-gap-minutes 3
+   ```
+
+   It exits nonzero unless model provenance, live data, broker state, market
+   clock, quality evidence, and the local decision hash chain all pass. It
+   never creates an order.
+
    For a finite staged paper observation window, use the read-only monitor. It
    refreshes completed bars and the paper risk snapshot for each iteration,
    appends each prediction to a durable journal, and never submits an order:

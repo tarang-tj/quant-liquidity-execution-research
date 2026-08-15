@@ -89,6 +89,20 @@ The output report is atomically written and pinned to one model hash. Paper
 submission rejects a missing, stale, mixed-model, symbol-mismatched, or failed
 report.
 
+Use the combined read-only health snapshot as the machine-checkable session
+gate. It verifies the model, live data, broker state, market clock, fresh
+quality report, and decision-journal integrity without submitting:
+
+```bash
+python live/health.py --symbol SPY \
+  --quality-report runtime/SPY_quality.json \
+  --decision-log runtime/paper_monitor_decisions.jsonl \
+  --max-training-gap-hours 168 --max-bar-gap-minutes 3
+```
+
+Treat a nonzero exit as a hold condition and route the structured JSON to the
+operator alerting system.
+
 ## Stage 4: explicitly authorized paper submission
 
 Only after the preceding evidence is reviewed may an operator use
