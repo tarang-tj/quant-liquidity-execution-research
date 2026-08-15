@@ -87,16 +87,53 @@ def score_predictions(decisions: Iterable[PaperDecision], bars: Iterable[Bar]) -
     return result
 
 
+def apply_quality_gate(metrics: dict[str, object], *, minimum_scored: int = 20,
+                       minimum_accuracy: float = 0.52, maximum_brier: float = 0.25) -> dict[str, object]:
+    """Attach an explicit evidence gate used by scheduled monitoring."""
+    if (type(minimum_scored) is not int or minimum_scored < 1 or
+            not isfinite(minimum_accuracy) or not 0 <= minimum_accuracy <= 1 or
+            not isfinite(maximum_brier) or not 0 <= maximum_brier <= 1):
+        raise ValueError("invalid live-quality thresholds")
+    scored = metrics.get("scored")
+    accuracy = metrics.get("accuracy")
+    brier = metrics.get("brier")
+    checks = {
+        "minimum_scored": isinstance(scored, int) and scored >= minimum_scored,
+        "minimum_accuracy": isinstance(accuracy, (int, float)) and isfinite(float(accuracy))
+        and float(accuracy) >= minimum_accuracy,
+        "maximum_brier": isinstance(brier, (int, float)) and isfinite(float(brier))
+        and float(brier) <= maximum_brier,
+    }
+    result = dict(metrics)
+    result["quality_gate"] = {
+        "passed": all(checks.values()),
+        "checks": checks,
+        "minimum_scored": minimum_scored,
+        "minimum_accuracy": minimum_accuracy,
+        "maximum_brier": maximum_brier,
+    }
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score journaled live predictions without submitting orders")
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--feed", choices=("iex", "sip"), default="iex")
     parser.add_argument("--decision-log", type=Path, required=True)
     parser.add_argument("--bars", type=int, default=1_000)
+    parser.add_argument("--minimum-scored", type=int, default=20)
+    parser.add_argument("--minimum-accuracy", type=float, default=0.52)
+    parser.add_argument("--maximum-brier", type=float, default=0.25)
     args = parser.parse_args()
     decisions = PaperDecisionLog(args.decision_log).read()
     bars = AlpacaMarketDataClient(feed=args.feed).bars(args.symbol, limit=args.bars)
-    print(json.dumps(score_predictions(decisions, bars), sort_keys=True))
+    report = apply_quality_gate(
+        score_predictions(decisions, bars), minimum_scored=args.minimum_scored,
+        minimum_accuracy=args.minimum_accuracy, maximum_brier=args.maximum_brier,
+    )
+    print(json.dumps(report, sort_keys=True))
+    if not report["quality_gate"]["passed"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -78,8 +78,12 @@ records when the bar is not yet available:
 
 ```bash
 python live/score_predictions.py --symbol SPY \
-  --decision-log runtime/paper_monitor_decisions.jsonl --bars 1000
+  --decision-log runtime/paper_monitor_decisions.jsonl --bars 1000 \
+  --minimum-scored 20 --minimum-accuracy 0.52 --maximum-brier 0.25
 ```
+
+Treat a nonzero exit as a hold condition: do not promote or submit based on a
+model whose live evidence is insufficient or fails the configured quality gate.
 
 ## Stage 4: explicitly authorized paper submission
 

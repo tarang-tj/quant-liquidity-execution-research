@@ -33,7 +33,7 @@ from live.reconcile_paper import record_reconciliation_result
 from live.replay_decision import replay
 from live.run_paper import submit_and_record
 from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
-from live.score_predictions import score_predictions
+from live.score_predictions import apply_quality_gate, score_predictions
 from live.walk_forward import walk_forward_evaluate
 
 
@@ -139,6 +139,8 @@ class LiveBridgeTest(unittest.TestCase):
             pending = score_predictions([decision], self.bars[:-1])
             self.assertEqual(pending["scored"], 0)
             self.assertEqual(pending["pending"], 1)
+            self.assertTrue(apply_quality_gate(scored, minimum_scored=1)["quality_gate"]["passed"])
+            self.assertFalse(apply_quality_gate(pending, minimum_scored=1)["quality_gate"]["passed"])
 
     def test_model_rotation_is_atomic_and_preserves_previous_artifact_on_failure(self) -> None:
         model = train_direction_model(self.bars)
