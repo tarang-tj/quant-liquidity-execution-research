@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from live.market_data import AlpacaMarketDataClient, Bar, MarketDataError, Quote
+from live.market_data import AlpacaMarketDataClient, Bar, JsonlEventStore, MarketDataError, Quote
 from live.audit import PaperDecision, PaperDecisionLog
 from live.paper_broker import AlpacaPaperBroker, PaperRiskState
 from live.predictor import (LogisticDirectionModel, causal_training_matrix, live_features,
@@ -36,6 +36,7 @@ from live.replay_decision import replay
 from live.run_paper import submit_and_record, validate_quality_report
 from live.risk import OrderIntent, PaperSubmissionLease, RiskLimits, validate_paper_order
 from live.score_predictions import apply_quality_gate, build_quality_report, score_predictions, write_quality_report
+from live.stream_quotes import collect_quotes
 from live.walk_forward import walk_forward_evaluate
 
 
@@ -655,6 +656,32 @@ class LiveBridgeTest(unittest.TestCase):
         self.assertEqual(len(quotes), 2)
         self.assertEqual(len(sockets), 2)
         self.assertEqual(json.loads(sockets[0].sent[1])["quotes"], ["SPY"])
+
+    def test_bounded_quote_collector_durably_records_stream_and_never_submits(self) -> None:
+        fixture_quote, fixture_now = self.quote, self.now
+
+        class FakeClient:
+            async def stream_quotes(self, symbols: list[str], *, max_reconnects: int) -> object:
+                self.symbols = symbols
+                self.max_reconnects = max_reconnects
+                for index in range(3):
+                    yield replace(fixture_quote, timestamp=fixture_now + timedelta(microseconds=index))
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "quotes.jsonl"
+            client = FakeClient()
+            report = asyncio.run(collect_quotes(
+                client, ["spy", "SPY"],
+                JsonlEventStore(output),
+                max_quotes=2, timeout_seconds=5, max_reconnects=1,
+            ))
+            self.assertEqual(client.symbols, ["SPY"])
+            self.assertEqual(client.max_reconnects, 1)
+            self.assertEqual(report["quotes_written"], 2)
+            self.assertFalse(report["timed_out"])
+            self.assertTrue(report["paper_only"])
+            self.assertFalse(report["order_submission_attempted"])
+            self.assertEqual(len(output.read_text(encoding="utf-8").splitlines()), 2)
 
     def test_bar_schema_rejects_invalid_provider_payload(self) -> None:
         with self.assertRaises(MarketDataError):
