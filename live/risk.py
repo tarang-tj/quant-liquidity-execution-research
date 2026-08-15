@@ -66,11 +66,16 @@ class PaperSubmissionLease:
 
 def validate_paper_order(intent: OrderIntent, quote: Quote, current_position: float, daily_pnl: float,
                          limits: RiskLimits = RiskLimits(), now: datetime | None = None,
-                         pending_buy_quantity: float = 0.0, pending_sell_quantity: float = 0.0) -> RiskDecision:
+                         pending_buy_quantity: float = 0.0, pending_sell_quantity: float = 0.0,
+                         market_open: bool = True) -> RiskDecision:
     """Check fresh price, exposure, liquidity, loss, and emergency stop before any paper submission."""
     now = now or datetime.now(timezone.utc)
     if os.environ.get("TRADING_KILL_SWITCH", "0") == "1":
         return RiskDecision(False, "TRADING_KILL_SWITCH is enabled")
+    if not isinstance(market_open, bool):
+        return RiskDecision(False, "market session state is invalid")
+    if not market_open:
+        return RiskDecision(False, "market is closed")
     if not isinstance(intent.quantity, int) or isinstance(intent.quantity, bool) or intent.quantity <= 0:
         return RiskDecision(False, "quantity must be a positive whole number")
     if not all(isfinite(value) for value in (daily_pnl, current_position, pending_buy_quantity, pending_sell_quantity,

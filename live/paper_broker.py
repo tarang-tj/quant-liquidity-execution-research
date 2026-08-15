@@ -99,6 +99,13 @@ class AlpacaPaperBroker:
                               pending_buy_quantity=pending_buy_quantity,
                               pending_sell_quantity=pending_sell_quantity)
 
+    def market_clock(self) -> bool:
+        """Return the broker's current session state; malformed data fails closed."""
+        clock = self._get_json("/v2/clock")
+        if not isinstance(clock, dict) or not isinstance(clock.get("is_open"), bool):
+            raise MarketDataError("paper market-clock response lacks a boolean is_open field")
+        return clock["is_open"]
+
     def submit_market_order(self, intent: OrderIntent, client_order_id: str) -> dict[str, object]:
         if not client_order_id or len(client_order_id) > 48:
             raise ValueError("client_order_id must be a non-empty string of at most 48 characters")

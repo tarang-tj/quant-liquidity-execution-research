@@ -349,6 +349,16 @@ class LiveBridgeTest(unittest.TestCase):
             else:
                 os.environ["TRADING_KILL_SWITCH"] = old
 
+    def test_risk_gate_rejects_closed_or_invalid_market_session(self) -> None:
+        closed = validate_paper_order(OrderIntent("SPY", "buy", 1), self.quote, 0, 0,
+                                      RiskLimits(), self.now, market_open=False)
+        self.assertFalse(closed.approved)
+        self.assertEqual(closed.reason, "market is closed")
+        invalid = validate_paper_order(OrderIntent("SPY", "buy", 1), self.quote, 0, 0,
+                                       RiskLimits(), self.now, market_open=1)  # type: ignore[arg-type]
+        self.assertFalse(invalid.approved)
+        self.assertEqual(invalid.reason, "market session state is invalid")
+
     def test_quote_schema_normalizes_provider_fields(self) -> None:
         quote = Quote.from_alpaca({"S": "SPY", "bp": 100.0, "ap": 100.02, "bs": 10, "as": 12,
                                    "t": "2026-01-02T14:30:00Z"})
@@ -475,6 +485,14 @@ class LiveBridgeTest(unittest.TestCase):
         self.assertEqual(response["id"], "paper-order")
         self.assertEqual(open_mock.call_args.args[0].full_url, "https://paper-api.alpaca.markets/v2/orders")
         self.assertEqual(json.loads(open_mock.call_args.args[0].data.decode("utf-8"))["client_order_id"], "paper-test-order")
+
+    def test_paper_broker_market_clock_requires_boolean_state(self) -> None:
+        broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")
+        with patch.object(broker, "_get_json", return_value={"is_open": True}):
+            self.assertTrue(broker.market_clock())
+        with patch.object(broker, "_get_json", return_value={"is_open": "true"}):
+            with self.assertRaises(MarketDataError):
+                broker.market_clock()
 
     def test_reconciliation_uses_fixed_paper_endpoint(self) -> None:
         broker = AlpacaPaperBroker(key="paper-key", secret="paper-secret")

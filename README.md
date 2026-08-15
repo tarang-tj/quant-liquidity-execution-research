@@ -52,7 +52,9 @@ predictions use only completed minute bars, never the in-progress bar, and the
 decision path rejects model artifacts whose training window extends into the
 future relative to the live bars. Market-data REST snapshots use a small,
 bounded retry budget for transient transport/5xx/429 failures and fail closed
-when that budget is exhausted; order submission has no automatic retry path.
+when that budget is exhausted. Paper submission also reads Alpaca's market
+clock immediately before the risk decision and rejects a closed or malformed
+session state; order submission has no automatic retry path.
 
 1. Create separate Alpaca market-data and paper-trading credentials. Put them
    in your shell environment (never commit them); see [`.env.example`](.env.example).
